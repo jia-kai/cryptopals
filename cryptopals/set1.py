@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from .bytearr import Bytearr
-from .utils import challenge, assert_eq, open_resource, popcount
+from .utils import challenge, assert_eq, open_resource, popcount8
 
 import numpy as np
 import itertools
@@ -68,6 +68,13 @@ def ch05():
 
 @challenge
 def ch06():
+    assert_eq(
+        popcount8(
+            np.array(list(map(ord, 'this is a test')), dtype=np.uint8) ^
+            np.array(list(map(ord, 'wokka wokka!!!')), dtype=np.uint8)
+        ),
+        37
+    )
     with open_resource() as fin:
         data_br = Bytearr.from_base64(fin.read())
     data = data_br.np_data
@@ -76,7 +83,7 @@ def ch06():
     for i in range(2, 41):
         chunks = data[:i * NR_PAIRS * 2].reshape(NR_PAIRS, 2, i)
         scores.append((
-            sum(popcount(p[0] ^ p[1]) / i for p in chunks) / NR_PAIRS,
+            sum(popcount8(p[0] ^ p[1]) / i for p in chunks) / NR_PAIRS,
             i))
 
     scores.sort()

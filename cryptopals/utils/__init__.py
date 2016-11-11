@@ -7,7 +7,7 @@ import functools
 
 import pyximport
 px = pyximport.install(setup_args={'include_dirs': os.path.dirname(__file__)})
-from ._popcount import popcount
+from ._popcount import popcount8
 pyximport.uninstall(*px)
 del pyximport, px
 
