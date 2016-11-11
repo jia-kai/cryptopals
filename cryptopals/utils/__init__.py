@@ -52,3 +52,7 @@ def open_resource(ext='.txt', mode='r'):
     return open(os.path.join(SRC_ROOT, os.path.pardir,
                              'res', str(chnum) + ext),
                 mode)
+
+def summarize_str(s):
+    """summarize a string for display"""
+    return '{}...{}'.format(s[:10], s[-10:])

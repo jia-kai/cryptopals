@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
 from .bytearr import Bytearr
-from .utils import challenge, assert_eq, open_resource, popcount8
+from .utils import (challenge, assert_eq, open_resource, popcount8,
+                    summarize_str)
 
 import numpy as np
 import itertools
@@ -99,5 +100,41 @@ def ch06():
         if cur_score > best_score:
             best_score = cur_score
             key = cur_key
-    plain = Bytearr(data_br ^ itertools.cycle(key)).to_str()
-    return ''.join(map(chr, key)), '{}...{}'.format(plain[:10], plain[-10:])
+    return (''.join(map(chr, key)),
+            summarize_str(Bytearr(data_br ^ itertools.cycle(key)).to_str()))
+
+@challenge
+def ch07():
+    from cryptography.hazmat.primitives.ciphers import (
+        Cipher, algorithms, modes)
+    from cryptography.hazmat.primitives import padding
+    from cryptography.hazmat.backends import default_backend
+    key = b"YELLOW SUBMARINE"
+
+    backend = default_backend()
+    with open_resource() as fin:
+        data = Bytearr.from_base64(fin.read())
+
+    cipher = Cipher(algorithms.AES(key), modes.ECB(), backend=backend)
+    decryptor = cipher.decryptor()
+    plain = decryptor.update(data.to_bytes()) + decryptor.finalize()
+    unpadder = padding.PKCS7(128).unpadder()
+    plain = unpadder.update(plain) + unpadder.finalize()
+    return summarize_str(plain.decode('utf-8'))
+
+@challenge
+def ch08():
+    ans = None
+    with open_resource() as fin:
+        for line_num, line in enumerate(fin):
+            data = Bytearr.from_hex(line).np_data.reshape(-1, 16)
+            used = set()
+            for i in data:
+                i = bytes(i)
+                if i in used:
+                    assert ans is None
+                    ans = line_num + 1
+                    break
+                used.add(i)
+    assert ans is not None
+    return ans
