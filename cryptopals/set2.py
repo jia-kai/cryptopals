@@ -8,6 +8,7 @@ from .utils import challenge, assert_eq, open_resource, summarize_str, as_bytes
 import numpy as np
 
 import functools
+import itertools
 
 @challenge
 def ch09():
@@ -79,17 +80,25 @@ def ch12():
     assert ecb_chk[:block_size] == ecb_chk[block_size:block_size*2]
 
     inferred_plain = [0] * block_size
-    for start in range(len(encr(''))):
+    for start in itertools.count():
         prefix = block_size - 1 - start % block_size
         end = start + prefix + 1
         target = encr([0]*prefix)[end-block_size:end]
         prefix_seq = inferred_plain[-block_size+1:]
         prefix_seq.append(0)
+        found = False
         for probe in range(256):
             prefix_seq[-1] = probe
             if encr(prefix_seq)[:block_size] == target:
+                found = True
                 inferred_plain.append(probe)
                 break
+        if not found:
+            # we could not recover the second pkcs#7 padding character since
+            # the first padding would change when adding prefix for it
+            # So found would be False on second padding char
+            assert inferred_plain[-1] == 1
+            break
     plain = as_bytes(pkcs7_unpad(inferred_plain[block_size:]))
     assert_eq(plain, Bytearr.from_base64(secret_b64).to_bytes())
     return summarize_str(plain)
