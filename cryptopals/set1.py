@@ -3,6 +3,7 @@
 from .bytearr import Bytearr
 from .utils import (challenge, assert_eq, open_resource, popcount8,
                     summarize_str)
+from .algo.block import pkcs7_unpad, aes_ecb
 
 import numpy as np
 import itertools
@@ -105,21 +106,13 @@ def ch06():
 
 @challenge
 def ch07():
-    from cryptography.hazmat.primitives.ciphers import (
-        Cipher, algorithms, modes)
-    from cryptography.hazmat.primitives import padding
-    from cryptography.hazmat.backends import default_backend
     key = b"YELLOW SUBMARINE"
-
-    backend = default_backend()
     with open_resource() as fin:
         data = Bytearr.from_base64(fin.read())
 
-    cipher = Cipher(algorithms.AES(key), modes.ECB(), backend=backend)
-    decryptor = cipher.decryptor()
+    decryptor = aes_ecb(key).decryptor()
     plain = decryptor.update(data.to_bytes()) + decryptor.finalize()
-    unpadder = padding.PKCS7(128).unpadder()
-    plain = unpadder.update(plain) + unpadder.finalize()
+    plain = pkcs7_unpad(plain)
     return summarize_str(plain.decode('utf-8'))
 
 @challenge

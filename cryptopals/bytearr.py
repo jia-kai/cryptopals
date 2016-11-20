@@ -14,8 +14,16 @@ class Bytearr:
 
     _data = None
 
-    def __init__(self, data):
-        if isinstance(data, str):
+    def __init__(self, data, *, allow_borrow=False):
+        if isinstance(data, Bytearr):
+            data = data._data
+
+        if isinstance(data, np.ndarray):
+            assert data.ndim == 1
+            if not allow_borrow:
+                self._data = np.array(data, dtype=np.uint8)
+                return
+        elif isinstance(data, str):
             data = [ord(i) for i in data]
         else:
             if not isinstance(data, (list, tuple)):
@@ -41,8 +49,14 @@ class Bytearr:
 
         return map(lambda x: x[0] ^ x[1], zip(self._data, rhs))
 
+    def __ixor__(self, rhs):
+        self._data ^= Bytearr(rhs, allow_borrow=True).np_data
+
     def __iter__(self):
         return iter(self._data)
+
+    def __len__(self):
+        return len(self._data)
 
     @property
     def np_data(self):

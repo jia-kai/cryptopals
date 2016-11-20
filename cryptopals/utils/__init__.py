@@ -5,6 +5,8 @@ import importlib
 import os
 import functools
 
+import numpy as np
+
 import pyximport
 px = pyximport.install(setup_args={'include_dirs': os.path.dirname(__file__)})
 from ._popcount import popcount8
@@ -55,4 +57,20 @@ def open_resource(ext='.txt', mode='r'):
 
 def summarize_str(s):
     """summarize a string for display"""
+    if isinstance(s, bytes):
+        s = s.decode('utf-8')
+    assert isinstance(s, str)
     return '{}...{}'.format(s[:10], s[-10:])
+
+def as_bytes(val):
+    """convert some value to bytes"""
+    from ..bytearr import Bytearr
+    if isinstance(val, str):
+        val = val.encode('utf-8')
+    elif isinstance(val, np.ndarray):
+        assert val.dtype == np.uint8
+        val = val.tostring()
+    elif isinstance(val, Bytearr):
+        val = val.to_bytes()
+    assert isinstance(val, bytes)
+    return val
