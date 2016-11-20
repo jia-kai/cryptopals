@@ -36,6 +36,9 @@ class Bytearr:
             rhs = Bytearr(rhs)
         return np.all(self._data == rhs._data)
 
+    def __getitem__(self, idx):
+        return Bytearr(self._data.__getitem__(idx), allow_borrow=True)
+
     def __xor__(self, rhs):
         """xor with another Bytearr or a single byte or an iterator of byte
 

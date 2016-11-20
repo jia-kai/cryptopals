@@ -72,5 +72,13 @@ def as_bytes(val):
         val = val.tostring()
     elif isinstance(val, Bytearr):
         val = val.to_bytes()
+    elif isinstance(val, (list, tuple)):
+        if not val:
+            return bytes()
+        if isinstance(val[0], str):
+            val = ''.join(val).encode('utf-8')
+        else:
+            assert isinstance(val[0], int)
+            val = bytes(val)
     assert isinstance(val, bytes)
     return val
