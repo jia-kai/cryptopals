@@ -2,7 +2,7 @@
 
 """block ciphers"""
 
-from ..utils import as_bytes
+from ..utils import as_bytes, as_np_bytearr, CipherError
 from ..bytearr import Bytearr
 
 import numpy as np
@@ -24,7 +24,13 @@ def pkcs7_unpad(data, block=16):
     :rtype: :class:`bytes`
     """
     data = as_bytes(data)
-    return data[:-data[-1]]
+    if len(data) % block:
+        raise CipherError(
+            'bad data size: block={} data={}'.format(block, len(data)))
+    nr = data[-1]
+    if not (nr > 0 and set(data[-nr:]) == {nr}):
+        raise CipherError('bad padding(block={}): {}'.format(block, data))
+    return data[:-nr]
 
 
 def cbc_encrypt(iv, data, block_enc, block_size=16):
@@ -33,12 +39,11 @@ def cbc_encrypt(iv, data, block_enc, block_size=16):
     :rtype: :class:`.Bytearr`
     """
 
-    iv = Bytearr(iv, allow_borrow=True).np_data
-    data = Bytearr(data, allow_borrow=True).np_data.reshape(-1, block_size)
+    iv = as_np_bytearr(iv)
+    data = as_np_bytearr(data).reshape(-1, block_size)
     ret = np.empty_like(data)
     for idx, plain in enumerate(data):
-        iv = Bytearr(
-            block_enc(as_bytes(plain ^ iv)), allow_borrow=True).np_data
+        iv = as_np_bytearr(block_enc(as_bytes(plain ^ iv)))
         ret[idx] = iv
     return Bytearr(ret.flatten(), allow_borrow=True)
 
@@ -47,12 +52,12 @@ def cbc_decrypt(iv, data, block_dec, block_size=16):
 
     :rtype: :class:`.Bytearr`
     """
-    iv = Bytearr(iv, allow_borrow=True).np_data
-    ciphertext = Bytearr(data, allow_borrow=True)
-    plaintext = Bytearr(block_dec(ciphertext.to_bytes())).np_data.reshape(
+    iv = as_np_bytearr(iv)
+    ciphertext = as_np_bytearr(data)
+    plaintext = as_np_bytearr(block_dec(ciphertext.tostring())).reshape(
         -1, block_size)
     plaintext[0] ^= iv
-    plaintext[1:] ^= ciphertext.np_data.reshape(-1, block_size)[:-1]
+    plaintext[1:] ^= ciphertext.reshape(-1, block_size)[:-1]
     return Bytearr(plaintext.flatten(), allow_borrow=True)
 
 def aes_ecb(key):

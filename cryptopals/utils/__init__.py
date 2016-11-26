@@ -82,3 +82,10 @@ def as_bytes(val):
             val = bytes(val)
     assert isinstance(val, bytes)
     return val
+
+def as_np_bytearr(val):
+    from ..bytearr import Bytearr
+    return Bytearr(val, allow_borrow=True).np_data
+
+class CipherError(RuntimeError):
+    """exception class for cipher algorithms"""

@@ -3,7 +3,8 @@
 from .bytearr import Bytearr
 from .algo.block import (pkcs7_pad, pkcs7_unpad, cbc_decrypt, cbc_encrypt,
                          aes_ecb)
-from .utils import challenge, assert_eq, open_resource, summarize_str, as_bytes
+from .utils import (challenge, assert_eq, open_resource, summarize_str,
+                    as_bytes, as_np_bytearr, CipherError)
 
 import numpy as np
 
@@ -108,7 +109,7 @@ def ch12_solve(block_size, encr):
             # So found would be False on second padding char
             assert inferred_plain[-1] == 1
             break
-    return as_bytes(pkcs7_unpad(inferred_plain[block_size:]))
+    return as_bytes(inferred_plain[block_size:-1])
 
 @challenge
 def ch13():
@@ -180,3 +181,73 @@ def ch14():
     pad = as_bytes(''.join(probe[:-block_size]))
     plain = ch12_solve(block_size, lambda t: encr(pad+as_bytes(t))[start:])
     assert_eq(plain, target_bytes)
+
+@challenge
+def ch15():
+    assert_eq(pkcs7_unpad("ICE ICE BABY\x04\x04\x04\x04"), b"ICE ICE BABY")
+    try:
+        pkcs7_unpad("ICE ICE BABY\x05\x05\x05\x05")
+        assert 0
+    except CipherError:
+        pass
+
+    try:
+        pkcs7_unpad("ICE ICE BABY\x01\x02\x03\x04")
+        assert 0
+    except CipherError:
+        pass
+
+@challenge
+def ch16():
+    PREFIX = 'comment1=cooking%20MCs;userdata='
+    SUFFIX = ';comment2=%20like%20a%20pound%20of%20bacon'
+    class Server:
+        _iv = None
+        _encr_impl = None
+        _decr_impl = None
+
+        def __init__(self):
+            self._iv = Bytearr(np.random.bytes(16), allow_borrow=True)
+            enc = aes_ecb(np.random.bytes(16))
+            self._encr_impl = enc.encryptor().update
+            self._decr_impl = enc.decryptor().update
+
+        def get_cookie(self, ud):
+            q = pkcs7_pad(PREFIX + quote(ud) + SUFFIX)
+            return cbc_encrypt(self._iv, q, self._encr_impl).np_data
+
+        def decode_cookie(self, cookie):
+            return pkcs7_unpad(cbc_decrypt(self._iv, cookie, self._decr_impl))
+
+        def parse_cookie(self, cookie):
+            # tried to find an encrypted block that can be decrypted to plain
+            # ascii; but it does not seem to work in reasonable time
+            return {k.decode('ascii'): v.decode('utf-8')
+                    for k, v in
+                    parse_qsl(self.decode_cookie(cookie), strict_parsing=True)}
+
+    srv = Server()
+    block_size = 16
+    sec = srv.get_cookie('x' * ((-(len(PREFIX) + len(SUFFIX))) % block_size))
+    sec = as_np_bytearr(sec)
+
+    target = ';admin=true;'
+    tpad = block_size - len(target)
+    assert tpad > 0
+    sec[-block_size*3:-block_size*2] ^= (
+        as_np_bytearr(target + 'x' * tpad) ^
+        as_np_bytearr(SUFFIX[-block_size:]))
+
+    if False:
+        for last in itertools.product(*[range(128) for _ in range(tpad)]):
+            try:
+                print(last)
+                sec[end-tpad:end] = last
+                dec = srv.parse_cookie(sec)
+                break
+            except UnicodeDecodeError as exc:
+                print(exc)
+        assert_eq(dec['admin'], b'true')
+        return dec
+
+    assert target.encode('utf-8') in srv.decode_cookie(sec)
