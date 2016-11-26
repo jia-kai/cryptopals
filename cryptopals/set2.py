@@ -9,6 +9,7 @@ import numpy as np
 
 import functools
 import itertools
+from urllib.parse import urlencode, parse_qsl, quote
 
 @challenge
 def ch09():
@@ -102,3 +103,42 @@ def ch12():
     plain = as_bytes(pkcs7_unpad(inferred_plain[block_size:]))
     assert_eq(plain, Bytearr.from_base64(secret_b64).to_bytes())
     return summarize_str(plain)
+
+@challenge
+def ch13():
+    class Server:
+        _encr_impl = None
+        _decr_impl = None
+
+        def __init__(self):
+            enc = aes_ecb(np.random.bytes(16))
+            self._encr_impl = enc.encryptor().update
+            self._decr_impl = enc.decryptor().update
+
+        def get_cookie(self, email):
+            q = urlencode([('email', email), ('uid', '10'), ('role', 'user')])
+            return self._encr_impl(pkcs7_pad(q))
+
+        def parse_cookie(self, cookie):
+            return {k.decode('ascii'): v.decode('ascii')
+                    for k, v in
+                    parse_qsl(pkcs7_unpad(self._decr_impl(cookie)),
+                              strict_parsing=True)}
+
+    srv = Server()
+    blk_size = 16
+    s0 = 'email=&uid=10&role='
+    p0 = blk_size - len(s0) % blk_size
+    up_to_role_eq = srv.get_cookie('A' * p0)[:len(s0)+p0]
+    assert len(up_to_role_eq) % blk_size == 0
+    admin_pad = 'admin'
+    n = blk_size - len(admin_pad)
+    while quote(chr(n)) != chr(n):
+        n += blk_size
+    admin_pad += chr(n) * n
+    admin_enc = srv.get_cookie('A'*(blk_size - len('email=')) + admin_pad)[
+        blk_size:blk_size+len(admin_pad)]
+    evil = up_to_role_eq + admin_enc
+    ret = srv.parse_cookie(evil)
+    assert_eq(ret['role'], 'admin')
+    return ret
