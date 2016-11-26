@@ -9,6 +9,7 @@ import numpy as np
 
 import functools
 import itertools
+import collections
 from urllib.parse import urlencode, parse_qsl, quote
 
 @challenge
@@ -75,7 +76,14 @@ def ch12():
                 return len(prev)
             prev = cur
 
-    block_size = get_block_size()
+    plain = ch12_solve(get_block_size(), encr)
+    assert_eq(plain, Bytearr.from_base64(secret_b64).to_bytes())
+    return summarize_str(plain)
+
+def ch12_solve(block_size, encr):
+    """
+    encr(x) = AES-ECB(x + secret), solve for secret
+    """
     # check ECB
     ecb_chk = encr('\x00' * (block_size * 2))
     assert ecb_chk[:block_size] == ecb_chk[block_size:block_size*2]
@@ -100,9 +108,7 @@ def ch12():
             # So found would be False on second padding char
             assert inferred_plain[-1] == 1
             break
-    plain = as_bytes(pkcs7_unpad(inferred_plain[block_size:]))
-    assert_eq(plain, Bytearr.from_base64(secret_b64).to_bytes())
-    return summarize_str(plain)
+    return as_bytes(pkcs7_unpad(inferred_plain[block_size:]))
 
 @challenge
 def ch13():
@@ -142,3 +148,35 @@ def ch13():
     ret = srv.parse_cookie(evil)
     assert_eq(ret['role'], 'admin')
     return ret
+
+@challenge
+def ch14():
+    target_bytes = np.random.bytes(np.random.randint(10, 64))
+    def encr(data, *,
+             prefix=as_bytes(np.random.bytes(np.random.randint(32))),
+             impl=aes_ecb(np.random.bytes(16)).encryptor().update):
+        return impl(pkcs7_pad(prefix + as_bytes(data) + target_bytes))
+
+    max_guess = 128
+    probe = 'x' * (max_guess * 6)
+    t = encr(probe)
+    for i in range(2, max_guess):
+        if len(t) % i:
+            continue
+        cnt = collections.Counter(t[j:j+i] for j in range(0, len(t), i))
+        (k, v), = cnt.most_common(1)
+        if v >= len(probe) // i - 2:
+            block_size = i
+            probe_blkenc = k
+            start = t.find(k)
+            break
+
+    assert_eq(16, block_size)
+    assert_eq(0, start % block_size)
+    probe = ['x'] * block_size
+    while probe_blkenc not in encr(probe):
+        probe.append('x')
+
+    pad = as_bytes(''.join(probe[:-block_size]))
+    plain = ch12_solve(block_size, lambda t: encr(pad+as_bytes(t))[start:])
+    assert_eq(plain, target_bytes)
