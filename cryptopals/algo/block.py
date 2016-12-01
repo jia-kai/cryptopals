@@ -7,6 +7,7 @@ from ..bytearr import Bytearr
 
 import numpy as np
 
+import collections
 import itertools
 
 def pkcs7_pad(data, block=16):
@@ -68,3 +69,23 @@ def aes_ecb(key):
     key = as_bytes(key)
     backend = default_backend()
     return Cipher(algorithms.AES(key), modes.ECB(), backend=backend)
+
+def ctr_encrypt(block_cipher, data, nonce=0, dtype=np.uint64):
+    """CTR mode that turns a block cipher into a key stream; note that data may
+    be modified inplace
+
+    :param block_cipher: callable to encrypt a single block that
+        constitutes nonce and counter
+    :rtype: numpy.ndarary[np.uint8]
+    """
+
+    assert isinstance(block_cipher, collections.Callable)
+    state = np.zeros(2, dtype=dtype)
+    state[0] = nonce
+    bs = state.nbytes
+    data = as_np_bytearr(data)
+    for i in range(0, len(data), bs):
+        end = min(i + bs, len(data))
+        data[i:end] ^= as_np_bytearr(block_cipher(state.tostring()))[:end-i]
+        state[1] += 1
+    return data

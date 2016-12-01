@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 
-from .utils import challenge, assert_eq, open_resource, CipherError
+from .utils import challenge, assert_eq, open_resource, CipherError, as_bytes
 from .algo.block import (aes_ecb, pkcs7_pad, pkcs7_unpad, cbc_encrypt,
-                         cbc_decrypt, as_np_bytearr)
+                         cbc_decrypt, as_np_bytearr, ctr_encrypt)
 from .bytearr import Bytearr
 
 import numpy as np
@@ -76,3 +76,11 @@ def ch17():
         plain.extend(map(int, iv ^ cur))
         iv = ciphertext[i:i+block_size]
     return pkcs7_unpad(plain).decode('ascii')
+
+@challenge
+def ch18():
+    data = ('L77na/nrFsKvynd6HzOoG7GHTLXsTVu9qvY'
+            '/2syLXzhPweyyMTJULu/6/kXX0KSvoOLSFQ==')
+    return as_bytes(ctr_encrypt(
+        aes_ecb('YELLOW SUBMARINE').encryptor().update,
+        Bytearr.from_base64(data))).decode('ascii')
