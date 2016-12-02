@@ -68,7 +68,7 @@ def as_bytes(val):
     if isinstance(val, str):
         val = val.encode('utf-8')
     elif isinstance(val, np.ndarray):
-        assert val.dtype == np.uint8
+        assert val.dtype == np.uint8, val.dtype
         val = val.tostring()
     elif isinstance(val, Bytearr):
         val = val.to_bytes()

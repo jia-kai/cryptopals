@@ -88,20 +88,7 @@ def ch18():
 
 @challenge
 def ch19():
-    data = []
-    with open_resource() as fin:
-        for line in fin:
-            data.append(Bytearr.from_base64(line).np_data)
-
-    key = []
-    for i in range(0, max(map(len, data))):
-        cipher = np.array([j[i] for j in data if len(j) > i])
-        if len(cipher) <= len(data) // 2:
-            break
-        keys = np.arange(256, dtype=np.uint8)[:, np.newaxis]
-        cand = cipher[np.newaxis] ^ keys
-        score = np.logical_and(cand >= ord('a'), cand <= ord('z')).sum(axis=1)
-        key.append(np.argmax(score))
+    data, key = ch19_stat(lambda x: x // 2)
 
     key.append(ord('g') ^ 103); key.append(ord('h') ^ 104)
     key.append(ord('n') ^ 110); key.append(ord('d') ^ 100)
@@ -112,5 +99,44 @@ def ch19():
     plain = []
     for i in data:
         plain.extend(key[:len(i)] ^ i)
+        plain.append(ord(' '))
+    return summarize_str(as_bytes(plain).decode('ascii'))
+
+def ch19_stat(thresh):
+    data = []
+    with open_resource() as fin:
+        for line in fin:
+            data.append(Bytearr.from_base64(line).np_data)
+
+    key = []
+    thresh = thresh(len(data))
+    for i in range(0, max(map(len, data))):
+        cipher = np.array([j[i] for j in data if len(j) > i])
+        if len(cipher) <= thresh:
+            break
+        keys = np.arange(256, dtype=np.uint8)[:, np.newaxis]
+        cand = cipher[np.newaxis] ^ keys
+        score = np.logical_and(cand >= ord('a'), cand <= ord('z')).sum(axis=1)
+        key.append(np.argmax(score))
+    return data, key
+
+@challenge
+def ch20():
+    data, key = ch19_stat(lambda x: min(x // 3, 10))
+    if False:
+        k = len(key)
+        for i in data:
+            if len(i) >= len(key):
+                print(as_bytes(as_np_bytearr(i[:k] ^ key[:k])), i[k:])
+    key.extend(
+        as_np_bytearr('rve the whole scenery') ^
+        [114,118,101,32,116,104,101,32,119,104,111,108,101,32,115,99,101,
+         110,101,114,121])
+
+    plain = []
+    for i in data:
+        cur = as_np_bytearr(key[:len(i)] ^ i)
+        #print(as_bytes(cur))
+        plain.extend(cur)
         plain.append(ord(' '))
     return summarize_str(as_bytes(plain).decode('ascii'))
