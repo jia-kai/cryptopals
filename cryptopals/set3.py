@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
-from .utils import challenge, assert_eq, open_resource, CipherError, as_bytes
+from .utils import (challenge, assert_eq, open_resource, CipherError, as_bytes,
+                    summarize_str)
 from .algo.block import (aes_ecb, pkcs7_pad, pkcs7_unpad, cbc_encrypt,
                          cbc_decrypt, as_np_bytearr, ctr_encrypt)
 from .bytearr import Bytearr
@@ -84,3 +85,32 @@ def ch18():
     return as_bytes(ctr_encrypt(
         aes_ecb('YELLOW SUBMARINE').encryptor().update,
         Bytearr.from_base64(data))).decode('ascii')
+
+@challenge
+def ch19():
+    data = []
+    with open_resource() as fin:
+        for line in fin:
+            data.append(Bytearr.from_base64(line).np_data)
+
+    key = []
+    for i in range(0, max(map(len, data))):
+        cipher = np.array([j[i] for j in data if len(j) > i])
+        if len(cipher) <= len(data) // 2:
+            break
+        keys = np.arange(256, dtype=np.uint8)[:, np.newaxis]
+        cand = cipher[np.newaxis] ^ keys
+        score = np.logical_and(cand >= ord('a'), cand <= ord('z')).sum(axis=1)
+        key.append(np.argmax(score))
+
+    key.append(ord('g') ^ 103); key.append(ord('h') ^ 104)
+    key.append(ord('n') ^ 110); key.append(ord('d') ^ 100)
+    key.append(ord('d') ^ 100)
+    key.extend(as_np_bytearr('ead') ^ [101, 97, 100])
+    key.extend(as_np_bytearr('n,') ^ [110, 44])
+    key = as_np_bytearr(key)
+    plain = []
+    for i in data:
+        plain.extend(key[:len(i)] ^ i)
+        plain.append(ord(' '))
+    return summarize_str(as_bytes(plain).decode('ascii'))

@@ -78,6 +78,8 @@ def as_bytes(val):
         if isinstance(val[0], str):
             val = ''.join(val).encode('utf-8')
         else:
+            if isinstance(val[0], np.uint8):
+                val = list(map(int, val))
             assert isinstance(val[0], int)
             val = bytes(val)
     assert isinstance(val, bytes)
