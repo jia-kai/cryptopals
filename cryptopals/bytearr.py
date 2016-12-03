@@ -77,7 +77,7 @@ class Bytearr:
         return cls(np.fromstring(base64.b64decode(data), dtype=np.uint8))
 
     def to_base64(self):
-        return base64.b64encode(self._data.tobytes()).decode('utf-8')
+        return base64.b64encode(self._data.tobytes()).decode('ascii')
 
     def to_bytes(self):
         return self._data.tobytes()
@@ -85,3 +85,6 @@ class Bytearr:
     def to_str(self):
         """interpret as utf-8 encoded str"""
         return self._data.tobytes().decode('utf-8')
+
+    def to_hex(self):
+        return binascii.hexlify(self.to_bytes()).decode('ascii')
