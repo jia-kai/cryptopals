@@ -2,6 +2,7 @@
 
 from .utils import challenge, assert_eq, as_bytes
 from .algo.hash import sha1, md4, hmac
+from .algo.numt import round_up
 from .bytearr import Bytearr
 
 import functools
@@ -50,9 +51,6 @@ def ch29_impl(hash_impl):
 
         def request(self, msg):
             return hash_impl(self._key + as_bytes(msg))
-
-    ceil_div = lambda a, b: (a+b-1)//b
-    round_up = lambda a, b: ceil_div(a, b) * b
 
     msg = (b"comment1=cooking%20MCs;userdata=foo;"
            b"comment2=%20like%20a%20pound%20of%20bacon")

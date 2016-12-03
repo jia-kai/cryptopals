@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+"""hash routines"""
+
 from ..utils import as_bytes, as_np_bytearr
 from ..bytearr import Bytearr
 

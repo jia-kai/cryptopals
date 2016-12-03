@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+"""(pseudo) random number generators"""
+
 from abc import ABCMeta, abstractproperty
 import numpy as np
 
