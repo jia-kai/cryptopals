@@ -179,8 +179,8 @@ def ch21():
 
         def twist(self):
             for i in range(624):
-                # Get the most significant bit and add it to the less significant
-                # bits of the next number
+                # Get the most significant bit and add it to the less
+                # significant bits of the next number
                 y = _int32((self.mt[i] & 0x80000000) +
                            (self.mt[(i + 1) % 624] & 0x7fffffff))
                 self.mt[i] = self.mt[(i + 397) % 624] ^ y >> 1
@@ -193,3 +193,57 @@ def ch21():
     r1 = MT19937Ref(42)
     for i in range(5000):
         assert_eq(r0(), r1.extract_number(), i)
+
+@challenge
+def ch22():
+    # just try some numbers before current timestamp
+    pass
+
+@challenge
+def ch23():
+    rng = MT19937(np.random.randint(2**32))
+    cloned = MT19937(0)
+
+    w = np.dtype(rng.dtype).itemsize * 8
+
+    def to_bits_le(x):
+        """convert x to little-endian bits"""
+        ret = list(map(int, bin(x)[2:]))[::-1]
+        ret += [0] * (w - len(ret))
+        return ret
+
+    def from_bits_le(bits):
+        return rng.dtype(sum(j << i for i, j in enumerate(bits)))
+
+    def inv_xsa(x, s, a):
+        """return y such that x == y ^ ((y << s) & a); s can be negative"""
+        if s < 0:
+            ss = -s
+            rev = lambda x: x[::-1]
+        else:
+            ss = s
+            rev = lambda x: x
+        ybits = rev(to_bits_le(x))
+        abits = rev(to_bits_le(a))
+        for i in range(ss, len(ybits)):
+            ybits[i] ^= ybits[i - ss] & abits[i]
+        y = from_bits_le(rev(ybits))
+        if s < 0:
+            assert (y ^ ((y >> ss) & a)) == x
+        else:
+            assert (y ^ ((y << ss) & a)) == x
+        return y
+
+    n, m, r = rng._nmr
+    a, b, c, s, t, u, d, l = rng._abcstudl
+    b, c, d = map(rng.dtype, (b, c, d))
+    for i in range(n):
+        x = rng()
+        x = inv_xsa(x, -l, ~rng.dtype(0))
+        x = inv_xsa(x, t, c)
+        x = inv_xsa(x, s, b)
+        x = inv_xsa(x, -u, d)
+        cloned._state[i] = x
+
+    for i in range(5000):
+        assert_eq(cloned(), rng(), i)
