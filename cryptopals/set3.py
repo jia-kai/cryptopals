@@ -197,7 +197,7 @@ def ch21():
 @challenge
 def ch22():
     # just try some numbers before current timestamp
-    pass
+    return 'skipped'
 
 @challenge
 def ch23():
@@ -251,4 +251,4 @@ def ch23():
 @challenge
 def ch24():
     # try each possible key; boring
-    pass
+    return 'skipped'

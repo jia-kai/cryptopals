@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from ..utils import as_bytes
+from ..utils import as_bytes, as_np_bytearr
 from ..bytearr import Bytearr
 
 import numpy as np
@@ -8,17 +8,11 @@ import numpy as np
 from abc import ABCMeta, abstractproperty, abstractmethod
 import struct
 
-dt_bigu32 = np.dtype('>I')
-dt_litu32 = np.dtype('<I')
-
-
 class _MD64Base:
     """base class for implementing a hash function with Merkle–Damgård
     construction"""
 
-    @abstractproperty
-    def _io_dtype(self):
-        """I/O dtype"""
+    _io_dtype = None
 
     @abstractproperty
     def _init_state(self):
@@ -29,7 +23,7 @@ class _MD64Base:
         """'>' or '<' to mark endian"""
 
     @classmethod
-    def _left_rotate(cls, n, b):
+    def _lrotate(cls, n, b):
         return (n << np.uint32(b)) | (n >> np.uint32(32 - b))
 
     @abstractmethod
@@ -39,8 +33,12 @@ class _MD64Base:
         :returnL new state
         """
 
+    def __init__(self):
+        self._io_dtype = np.dtype(self._endian + 'I')
+
     @property
     def io_dtype(self):
+        """numpy dtype for binary I/O"""
         return self._io_dtype
 
     def pad(self, message, nbytes_off=0):
@@ -59,7 +57,12 @@ class _MD64Base:
         return message
 
     def __call__(self, message, state=None, nbytes_off=0, outhex=False):
-        """ implement 64-byte-blocked Merkle–Damgård hash """
+        """compute hash result for given message
+
+        :param state: overwrite initial state
+        :param nbytes_off: see :meth:`pad`
+        :param outhex: if True, return a hex str; otherwise return digest bytes
+        """
         warnings_filters = np.warnings.filters[:]
         np.warnings.simplefilter("ignore", RuntimeWarning)
 
@@ -75,25 +78,25 @@ class _MD64Base:
             state = self._compress(block, state)
 
         np.warnings.filters[:] = warnings_filters
-        ret = state.astype(self._io_dtype)
+        ret = state.astype(self._io_dtype).tobytes()
         if outhex:
-            ret = Bytearr(ret.tobytes()).to_hex()
+            ret = Bytearr(ret).to_hex()
         return ret
 
+
 class _SHA1Impl(_MD64Base):
-    _io_dtype = dt_bigu32
     _init_state = (0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0)
     _endian = '>'
 
     @classmethod
     def _compress(cls, block, state):
         # modified from https://github.com/ajalt/python-sha1
-        left_rot = cls._left_rotate
+        lrot = cls._lrotate
 
         w = np.zeros(80, dtype=np.uint32)
         w[:16] = block
         for j in range(16, 80):
-            w[j] = left_rot(w[j-3] ^ w[j-8] ^ w[j-14] ^ w[j-16], 1)
+            w[j] = lrot(w[j-3] ^ w[j-8] ^ w[j-14] ^ w[j-16], 1)
 
         a, b, c, d, e = state
 
@@ -112,14 +115,14 @@ class _SHA1Impl(_MD64Base):
                 k = 0xCA62C1D6
 
             a, b, c, d, e = (
-                left_rot(a, 5) + f + e + np.uint32(k) + w[i],
-                a, left_rot(b, 30), c, d)
+                lrot(a, 5) + f + e + np.uint32(k) + w[i],
+                a, lrot(b, 30), c, d)
 
         state += a, b, c, d, e
         return state
 
+
 class _MD4Impl(_MD64Base):
-    _io_dtype = dt_litu32
     _init_state = _SHA1Impl._init_state[:4]
     _endian = '<'
 
@@ -127,7 +130,8 @@ class _MD4Impl(_MD64Base):
     def _compress(cls, block, state):
         # modified from http://www.acooke.org/cute/PurePython0.html
         assert len(block) == 16
-        left_rot = cls._left_rotate
+        lrot = cls._lrotate
+
         def f(x, y, z):
             return x & y | ~x & z
         def g(x, y, z):
@@ -136,13 +140,11 @@ class _MD4Impl(_MD64Base):
             return x ^ y ^ z
 
         def f1(a, b, c, d, k, s):
-            return left_rot(a + f(b, c, d) + block[k], s)
+            return lrot(a + f(b, c, d) + block[k], s)
         def f2(a, b, c, d, k, s):
-            return left_rot(
-                a + g(b, c, d) + block[k] + np.uint32(0x5a827999), s)
+            return lrot(a + g(b, c, d) + block[k] + np.uint32(0x5a827999), s)
         def f3(a, b, c, d, k, s):
-            return left_rot(
-                a + h(b, c, d) + block[k] + np.uint32(0x6ed9eba1), s)
+            return lrot(a + h(b, c, d) + block[k] + np.uint32(0x6ed9eba1), s)
 
         a, b, c, d = state
         a = f1(a,b,c,d, 0, 3)
@@ -198,6 +200,20 @@ class _MD4Impl(_MD64Base):
 
         state += a, b, c, d
         return state
+
+def hmac(key, message, hash_impl, block_size=64, **kwargs):
+    key = as_bytes(key)
+    if len(key) > block_size:
+        key = hash_impl(key)
+    if len(key) < block_size:
+        key += b'\x00' * (block_size - len(key))
+
+    key = as_np_bytearr(key)
+    assert key.size == block_size
+    o_key_pad = as_bytes(key ^ 0x5c)
+    i_key_pad = as_bytes(key ^ 0x36)
+    return hash_impl(o_key_pad + hash_impl(i_key_pad + as_bytes(message)),
+                     **kwargs)
 
 sha1 = _SHA1Impl()
 md4 = _MD4Impl()
