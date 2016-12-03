@@ -46,6 +46,8 @@ def discover_challenges():
 def assert_eq(a, b, msg=None):
     if msg is not None:
         msg = '; {}'.format(msg)
+    else:
+        msg = ''
     assert a == b, 'assert_eq failed: a={!r} b={!r}{}'.format(a, b, msg)
 
 def open_resource(ext='.txt', mode='r'):

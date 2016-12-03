@@ -247,3 +247,8 @@ def ch23():
 
     for i in range(5000):
         assert_eq(cloned(), rng(), i)
+
+@challenge
+def ch24():
+    # try each possible key; boring
+    pass
