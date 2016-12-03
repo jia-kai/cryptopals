@@ -43,8 +43,10 @@ def discover_challenges():
     _all_challenges.sort(key=lambda x: x.__name__)
     return _all_challenges
 
-def assert_eq(a, b):
-    assert a == b, 'assert_eq failed: a={!r} b={!r}'.format(a, b)
+def assert_eq(a, b, msg=None):
+    if msg is not None:
+        msg = '; {}'.format(msg)
+    assert a == b, 'assert_eq failed: a={!r} b={!r}{}'.format(a, b, msg)
 
 def open_resource(ext='.txt', mode='r'):
     """open resource file associated with current challenge"""
