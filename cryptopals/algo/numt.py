@@ -119,7 +119,7 @@ def gen_prime(bits, requirement=lambda x: True):
             return n
 
         # apply Cramér's conjecture to jump over the gap
-        n += max(1, int(n.bit_length() * math.log(2))**2)
+        n += max(2, int(n.bit_length() * math.log(2))**2)
 
 def next_prime(n):
     if not (n & 1):
