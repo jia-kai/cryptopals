@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 
 from .utils import challenge, assert_eq
-from .algo.key_exchange import DiffieHellman
+from .utils.emucs import run_cs_session
+from .algo.key_exchange import NIST_PRIME, DiffieHellman, SRP
+
+import numpy as np
 
 import functools
-import numpy as np
 
 @challenge
 def ch33():
@@ -15,15 +17,7 @@ def ch33():
               sess1.get_session_key(sess0.pubkey))
 
 
-    p = int(
-        'ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024'
-        'e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd'
-        '3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec'
-        '6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f'
-        '24117c4b1fe649286651ece45b3dc2007cb8a163bf0598da48361'
-        'c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552'
-        'bb9ed529077096966d670c354e4abc9804f1746c08ca237327fff'
-        'fffffffffffff', 16)
+    p = NIST_PRIME
     g = 2
 
     dh = DiffieHellman(p, g)
@@ -42,3 +36,25 @@ def ch35():
     # no interesting math involved
     # {1, p, p-1} ** n % p is too trival
     return 'skipped'
+
+@challenge
+def ch36_check_sha256():
+    from .algo.hash import sha256
+    import hashlib
+
+    assert_eq(
+        sha256('', outhex=True),
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+
+    for i in range(10):
+        msg = np.random.bytes(np.random.randint(1, 2000))
+        h = hashlib.sha256()
+        h.update(msg)
+        assert_eq(h.digest(), sha256(msg))
+
+@challenge
+def ch36():
+    server, client = SRP.make_server_client_pair()
+    run_cs_session(server, client)
+    assert_eq(client.result, True)
+    # in fact, both server and client computes S = g**((a+x*u)*b) % N
