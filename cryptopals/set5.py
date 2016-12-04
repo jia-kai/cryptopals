@@ -5,6 +5,7 @@ from .utils.emucs import run_cs_session
 from .algo.key_exchange import NIST_PRIME, DiffieHellman, SRP
 from .algo.numt import bytes2int, int2bytes
 from .algo.hash import sha256, hmac
+from .algo.asym import RSA
 
 import numpy as np
 
@@ -102,3 +103,9 @@ def ch38():
                         password_dict[np.random.randint(len(password_dict))])
     run_cs_session(fake_server, client)
     assert_eq(password, client._password)
+
+@challenge
+def ch39():
+    encr, decr = RSA.make_enc_dec_pair()
+    s = b'hello, world'
+    assert_eq(s, int2bytes(decr(encr(bytes2int(s)))))
