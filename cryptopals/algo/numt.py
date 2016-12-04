@@ -137,15 +137,38 @@ def egcd(a, b):
     y = (g - x * a) // b
     return g, x, y
 
+def lcm(a, b):
+    g, _, _ = egcd(a, b)
+    return a * b // g
+
 def invmod(a, m, b=1):
-    """solve x such that a*x mod m == b and x > 0"""
-    assert b > 0
+    """solve x such that a*x === b (mod m) and x > 0"""
+    b %= m
     g, x, _ = egcd(a, m)
     k, r = divmod(b, g)
     assert r == 0, (a, m, b, g)
     if k != 1:
         x *= k
     return x
+
+def solve_congruences(rems, mods):
+    """solve for x such that x === rems[i] (mod mods[i])
+
+    :return: (k, b) so that kt + b is a solution for any t
+    """
+    assert len(mods) == len(rems)
+
+    cur_mod = mods[0]
+    cur_rem = rems[0]
+
+    for i in range(1, len(mods)):
+        # assume x == k * cur_mod + cur_rem
+        k = invmod(cur_mod, mods[i], rems[i] - cur_rem)
+        cur_rem = k * cur_mod + cur_rem
+        cur_mod = lcm(cur_mod, mods[i])
+        cur_rem %= cur_mod
+
+    return cur_mod, cur_rem
 
 def main():
     from ..utils import assert_eq

@@ -3,11 +3,12 @@
 from .utils import challenge, assert_eq
 from .utils.emucs import run_cs_session
 from .algo.key_exchange import NIST_PRIME, DiffieHellman, SRP
-from .algo.numt import bytes2int, int2bytes
+from .algo.numt import bytes2int, int2bytes, solve_congruences
 from .algo.hash import sha256, hmac
 from .algo.asym import RSA
 
 import numpy as np
+import gmpy2
 
 import functools
 
@@ -109,3 +110,15 @@ def ch39():
     encr, decr = RSA.make_enc_dec_pair()
     s = b'hello, world'
     assert_eq(s, int2bytes(decr(encr(bytes2int(s)))))
+
+@challenge
+def ch40():
+    msg = bytes2int(np.random.bytes(20))
+    ciphertexts = []
+    for i in range(3):
+        encr, _ = RSA.make_enc_dec_pair(256, e=3)
+        ciphertexts.append((encr(msg), encr._n))
+
+    _, b = solve_congruences(*zip(*ciphertexts))
+    m, exact = gmpy2.iroot(b, 3)
+    assert_eq(int(m), msg)
