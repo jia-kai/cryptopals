@@ -59,12 +59,6 @@ class SRP:
         """used to prevent a 2-for-1 guess when an active attacker impersonates
         the server"""
 
-        password = None
-        """aggreed password
-
-        :type: bytes
-        """
-
         def powmod(self, a, x):
             return powmod(a, x, self.N)
         def powmod_g(self, x):
@@ -76,17 +70,17 @@ class SRP:
     class Server:
         _param = None
 
-        def __init__(self, param):
+        def __init__(self, param, password):
             assert isinstance(param, SRP.Param)
             self._param = param
+            self._password = password
 
         async def __call__(self, socket):
             param = self._param
 
             salt = np.random.bytes(np.random.randint(4, 16))
-            x = bytes2int(sha256(salt + param.password))
+            x = bytes2int(sha256(salt + self._password))
             v = param.powmod_g(x)
-            # password is not needed further
 
             login, A = await socket.recv()
 
@@ -108,10 +102,11 @@ class SRP:
 
         result = None
 
-        def __init__(self, param, login):
+        def __init__(self, param, login, password):
             assert isinstance(param, SRP.Param)
             self._param = param
             self._login = login
+            self._password = password
 
         async def __call__(self, socket):
             param = self._param
@@ -122,7 +117,7 @@ class SRP:
 
             salt, B = await socket.recv()
             u = bytes2int(sha256(int2bytes(A) + int2bytes(B)))
-            x = bytes2int(sha256(salt + param.password))
+            x = bytes2int(sha256(salt + self._password))
             S = param.powmod(B - param.k * param.powmod_g(x), a + u * x)
             K = sha256(int2bytes(S))
 
@@ -134,5 +129,5 @@ class SRP:
                                 param=None):
         if param is None:
             param = SRP.Param()
-        param.password = as_bytes(password)
-        return cls.Server(param), cls.Client(param, login)
+        password = as_bytes(password)
+        return cls.Server(param, password), cls.Client(param, login, password)

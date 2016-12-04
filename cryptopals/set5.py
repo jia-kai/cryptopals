@@ -3,6 +3,8 @@
 from .utils import challenge, assert_eq
 from .utils.emucs import run_cs_session
 from .algo.key_exchange import NIST_PRIME, DiffieHellman, SRP
+from .algo.numt import bytes2int, int2bytes
+from .algo.hash import sha256, hmac
 
 import numpy as np
 
@@ -58,3 +60,45 @@ def ch36():
     run_cs_session(server, client)
     assert_eq(client.result, True)
     # in fact, both server and client computes S = g**((a+x*u)*b) % N
+
+    del client.result
+    client._password += b'x'
+    run_cs_session(server, client)
+    assert_eq(client.result, False)
+
+@challenge
+def ch37():
+    # trival and boring
+    # but why not replace salt with something derived from (salt, password) in
+    # the final HMAC step?
+    return 'skipped'
+
+@challenge
+def ch38():
+    password_dict = [np.random.bytes(np.random.randint(5, 32))
+                     for _ in range(32)]
+
+    param = SRP.Param()
+    param.k = 0 # simplify the protocal
+    password = None
+    async def fake_server(socket):
+        nonlocal password
+        salt = b's'
+        _, A = await socket.recv()
+        socket.send((salt, param.g))
+        sig_cli = await socket.recv()
+        await socket.send(True).wait()
+
+        u = bytes2int(sha256(int2bytes(A) + int2bytes(param.g)))
+        for guess_passwd in password_dict:
+            x = bytes2int(sha256(salt + guess_passwd))
+            S = (A * param.powmod_g(u * x)) % param.N
+            K = sha256(int2bytes(S))
+            if hmac(K, salt, sha256) == sig_cli:
+                password = guess_passwd
+                return
+
+    client = SRP.Client(param, 'test',
+                        password_dict[np.random.randint(len(password_dict))])
+    run_cs_session(fake_server, client)
+    assert_eq(password, client._password)
