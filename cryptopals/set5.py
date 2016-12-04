@@ -10,8 +10,6 @@ from .algo.asym import RSA
 import numpy as np
 import gmpy2
 
-import functools
-
 @challenge
 def ch33():
     dh = DiffieHellman(37, 5)

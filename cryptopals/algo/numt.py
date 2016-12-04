@@ -2,6 +2,7 @@
 
 """number theory helper routines"""
 
+import math
 import numpy as np
 
 def powmod(a, p, m):
@@ -109,10 +110,16 @@ class _PrimalityTestImpl:
 
 primep = _PrimalityTestImpl(100)
 
-def gen_prime(bits):
+def gen_prime(bits, requirement=lambda x: True):
     """generate a prime of at least given bits long"""
     n = bytes2int(np.random.bytes(ceil_div(bits, 8)))
-    return next_prime(n)
+    while True:
+        n = next_prime(n)
+        if requirement(n):
+            return n
+
+        # apply Cramér's conjecture to jump over the gap
+        n += max(1, int(n.bit_length() * math.log(2))**2)
 
 def next_prime(n):
     if not (n & 1):
@@ -142,14 +149,14 @@ def lcm(a, b):
     return a * b // g
 
 def invmod(a, m, b=1):
-    """solve x such that a*x === b (mod m) and x > 0"""
+    """solve x such that a*x === b (mod m) and return the least positive x"""
     b %= m
     g, x, _ = egcd(a, m)
     k, r = divmod(b, g)
     assert r == 0, (a, m, b, g)
     if k != 1:
         x *= k
-    return x
+    return x % m
 
 def solve_congruences(rems, mods):
     """solve for x such that x === rems[i] (mod mods[i])
