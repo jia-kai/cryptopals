@@ -51,8 +51,9 @@ def primep(n):
 
 def gen_prime(bits, requirement=lambda x: True):
     """generate a prime of at least given bits long"""
-    n = bytes2int(np.random.bytes(ceil_div(bits, 8)))
-    n |= 1 << bits
+    n = bytes2int(np.random.bytes(bits // 8))
+    n ^= np.random.randint(256) << (bits - 8)
+    n |= 1 << (bits - 1)
     while True:
         n = next_prime(n)
         if requirement(n):

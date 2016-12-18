@@ -59,6 +59,16 @@ def open_resource(ext='.txt', mode='r'):
                              'res', str(chnum) + ext),
                 mode)
 
+def open_output(ext='.out', mode='w'):
+    """open resource file associated with current challenge"""
+    assert _cur_challange is not None, (
+        'open_output can only be called from a challenge')
+    chnum = int(_cur_challange.__name__[2:])
+    odir = os.path.join(SRC_ROOT, os.path.pardir, 'output')
+    if not os.path.isdir(odir):
+        os.makedirs(odir)
+    return open(os.path.join(odir, str(chnum) + ext), mode)
+
 def summarize_str(s):
     """summarize a string for display"""
     if isinstance(s, bytes):
