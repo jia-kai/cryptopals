@@ -3,11 +3,13 @@
 from .utils import challenge, assert_eq, as_bytes
 from .algo.numt import powmod, invmod, bytes2int, int2bytes
 from .algo.asym import RSA
+from .bytearr import Bytearr
 
 import numpy as np
 import gmpy2
 
 import re
+import os
 
 @challenge
 def ch41():
@@ -56,3 +58,61 @@ def ch42():
         n_upper <<= 8
 
     assert_eq(pkcs15_check(int2bytes(enc(n3)), msg), True)
+
+@challenge
+def ch43():
+    # I consider all brute-force methods half-boring, and this challenge only
+    # plays with simple modular equations being the other half
+    return 'skipped'
+
+@challenge
+def ch44():
+    # g, y both being 0 or 1 mod p, boring
+    return 'skipped'
+
+@challenge
+def ch45():
+    if os.getenv('CRYPTOPALS_BIGTEST'):
+        msg = Bytearr.from_base64(
+            'VGhhdCdzIHdoeSBJIGZvdW5kIHlvdSBkb24ndCBwbGF5IGF'
+            'yb3VuZCB3aXRoIHRoZSBGdW5reSBDb2xkIE1lZGluYQ==')
+        enc, dec = RSA.make_enc_dec_pair(bits=1024)
+    else:
+        msg = 'halo'
+        enc, dec = RSA.make_enc_dec_pair(bits=64)
+    msg = as_bytes(msg)
+
+    def parity(ciphertext, *, _dec=dec):
+        return _dec(ciphertext) & 1
+    del dec
+
+    ciphertext = enc(bytes2int(msg))
+
+    a = 0
+    s = 1
+    slog = 0
+    snext = 2
+    snext_enc_step = snext_enc = enc(snext)
+    snext_enc *= ciphertext
+    while enc._n >= snext:
+        a <<= 1
+        if parity(snext_enc):
+            a += 1
+        s = snext
+        slog += 1
+        snext <<= 1
+        snext_enc = snext_enc_step * snext_enc % enc._n
+
+    lo = a * enc._n >> slog
+    hi = (a + 1) * enc._n >> slog
+    diff = hi - lo
+    assert diff >= 1
+    if diff > 1:
+        assert diff == 2
+        mid = ((a<<1) + 1) * enc._n >> (slog + 1)
+        if not parity(enc(snext) * ciphertext):
+            hi = mid
+
+    recovered_plain = int2bytes(hi)
+    assert_eq(recovered_plain, msg)
+    return recovered_plain.decode('ascii')

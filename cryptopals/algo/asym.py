@@ -17,6 +17,7 @@ class RSA:
     @classmethod
     def make_enc_dec_pair(cls, bits=512, e=3):
         """make (encryptor, decryptor) opr pair"""
+        bits = bits // 2 + 1
         req = lambda x: x % e != 1
         p = gen_prime(bits, req)
         q = gen_prime(bits, req)
