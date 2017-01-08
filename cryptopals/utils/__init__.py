@@ -3,7 +3,10 @@
 import pkgutil
 import importlib
 import os
+import sys
+import io
 import functools
+import contextlib
 
 import numpy as np
 
@@ -102,6 +105,17 @@ def as_bytes(val):
 def as_np_bytearr(val):
     from ..bytearr import Bytearr
     return Bytearr(val, allow_borrow=True).np_data
+
+@contextlib.contextmanager
+def capture_stdout():
+    """capture stdout of statements in this context"""
+    old = sys.stdout
+    new = io.StringIO()
+    sys.stdout = new
+    try:
+        yield new
+    finally:
+        sys.stdout = old
 
 class CipherError(RuntimeError):
     """exception class for cipher algorithms"""
