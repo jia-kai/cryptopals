@@ -119,3 +119,8 @@ def capture_stdout():
 
 class CipherError(RuntimeError):
     """exception class for cipher algorithms"""
+
+def rangech(begin, end, incl_end=True):
+    """range for chars"""
+    for i in range(ord(begin), ord(end) + int(bool(incl_end))):
+        yield chr(i)
