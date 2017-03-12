@@ -53,6 +53,7 @@ class _MD64Base:
         :param nbytes_off: number of bytes to be assumed before given messsage
         :return: bytes
         """
+        assert nbytes_off >= 0
         message = as_bytes(message)
         nbytes = len(message) + nbytes_off
 
@@ -95,11 +96,19 @@ class _SHA1Impl(_MD64Base):
     _endian = '>'
 
     @classmethod
-    def _compress(cls, block, state):
+    def batched_compress(cls, block, state):
+        """compress a batch of data
+
+        :param block: data block, in the shape (16, N)
+        :param state: hash state, in the shape (5, N)
+        """
         # modified from https://github.com/ajalt/python-sha1
+        assert (block.ndim == 2 and state.ndim == 2 and block.shape[0] == 16
+                and state.shape[0] == 5 and block.dtype == np.uint32 and
+                state.shape[1] == block.shape[1])
         lrot = cls._left_rotate
 
-        w = np.empty(80, dtype=np.uint32)
+        w = np.empty((80, block.shape[1]), dtype=np.uint32)
         w[:16] = block
         for i in range(16, 80):
             w[i] = lrot(w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16], 1)
@@ -124,8 +133,12 @@ class _SHA1Impl(_MD64Base):
                 lrot(a, 5) + f + e + np.uint32(k) + w[i],
                 a, lrot(b, 30), c, d)
 
-        state += a, b, c, d, e
-        return state
+        return state + [a, b, c, d, e]
+
+    @classmethod
+    def _compress(cls, block, state):
+        return cls.batched_compress(
+            block[:, np.newaxis], state[:, np.newaxis])[:, 0]
 
 
 class _SHA256Impl(_MD64Base):

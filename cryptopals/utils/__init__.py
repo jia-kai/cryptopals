@@ -47,11 +47,18 @@ def discover_challenges():
     return _all_challenges
 
 def assert_eq(a, b, msg=None):
+    check = lambda a, b: a == b
+    if isinstance(a, np.ndarray):
+        assert (isinstance(b, np.ndarray) and
+                a.dtype == b.dtype and a.shape == b.shape), (a, b)
+
+        check = lambda a, b: np.alltrue(a == b)
+
     if msg is not None:
         msg = '; {}'.format(msg)
     else:
         msg = ''
-    assert a == b, 'assert_eq failed: a={!r} b={!r}{}'.format(a, b, msg)
+    assert check(a, b), 'assert_eq failed: a={!r} b={!r}{}'.format(a, b, msg)
 
 def open_resource(ext='.txt', mode='r'):
     """open resource file associated with current challenge"""

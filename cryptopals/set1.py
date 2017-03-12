@@ -123,7 +123,7 @@ def ch08():
             data = Bytearr.from_hex(line).np_data.reshape(-1, 16)
             used = set()
             for i in data:
-                i = bytes(i)
+                i = bytes(list(map(int, i)))
                 if i in used:
                     assert ans is None
                     ans = line_num + 1
