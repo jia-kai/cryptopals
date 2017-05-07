@@ -63,28 +63,32 @@ class _MD64Base:
 
         return message
 
-    def __call__(self, message, state=None, nbytes_off=0, outhex=False):
+    def __call__(self, message, state=None, nbytes_off=0, *,
+                 outhex=False, pad=True):
         """compute hash result for given message
 
         :param state: overwrite initial state
         :param nbytes_off: see :meth:`pad`
         :param outhex: if True, return a hex str; otherwise return digest bytes
+        :param pad: whether to add padding
         """
         warnings_filters = np.warnings.filters[:]
         np.warnings.simplefilter("ignore", RuntimeWarning)
 
-        if state is None:
-            state = self._init_state
-        state = np.array(state, dtype=np.uint32)
-        message = self.pad(message, nbytes_off)
-        assert len(message) % 64 == 0
+        try:
+            if state is None:
+                state = self._init_state
+            state = np.array(state, dtype=np.uint32)
+            if pad:
+                message = self.pad(message, nbytes_off)
+            assert len(message) % 64 == 0
 
-        for i in range(0, len(message), 64):
-            block = np.fromstring(message[i:i+64], dtype=self._io_dtype)
-            block = block.astype(np.uint32)
-            state = self._compress(block, state)
-
-        np.warnings.filters[:] = warnings_filters
+            for i in range(0, len(message), 64):
+                block = np.fromstring(message[i:i+64], dtype=self._io_dtype)
+                block = block.astype(np.uint32)
+                state = self._compress(block, state)
+        finally:
+            np.warnings.filters[:] = warnings_filters
         ret = state.astype(self._io_dtype).tobytes()
         if outhex:
             ret = Bytearr(ret).to_hex()
