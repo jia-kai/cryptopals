@@ -728,13 +728,13 @@ def ch55_impl():
 
         m = m.copy()
         rng = np.random.RandomState(42)
-        while True:
+        for cnt in itertools.count():
             if False:
                 test(True)
             else:
                 result = test(False)
                 if result is not None:
-                    return result
+                    return result, cnt + 1
             m[rng.randint(16)] ^= rng.randint(2**32)
 
     def run_test(inp_bytes):
@@ -742,13 +742,13 @@ def ch55_impl():
         inp_arr = np.fromstring(inp_bytes, dtype=np.uint32)
         assert_eq(md4_collide(inp_arr, compute_only=True),
                   md4(inp_bytes, pad=False))
-        m0, m1 = md4_collide(inp_arr)
+        (m0, m1), cnt = md4_collide(inp_arr)
         m0b = m0.tobytes()
         m1b = m1.tobytes()
         t0 = md4(m0b)
         t1 = md4(m1b)
         assert t0 == t1
-        return m0b, as_bytes(as_np_bytearr(m0b) - as_np_bytearr(m1b))
+        return m0b, as_bytes(as_np_bytearr(m0b) - as_np_bytearr(m1b)), cnt
 
     # rng = np.random.RandomState(15)
     # return run_test(rng.bytes(64))
