@@ -2,6 +2,8 @@
 #include "./rng.cuh"
 #include "./cuda_helper.cuh"
 
+#include <atomic>
+#include <mutex>
 #include <cassert>
 
 constexpr uint32_t
@@ -212,6 +214,39 @@ void get_byte_counts(
              reinterpret_cast<const KeyStreamTrx*>(input), output);
 }
 
+//! sum-reduce [nr_row, nr_col] matrix into [1, nr_col] and store in data
+__global__ void reduce_rows_inplace_kern(
+        uint32_t nr_row, uint32_t nr_col, uint32_t *data) {
+    for (uint32_t c = blockIdx.x * blockDim.x + threadIdx.x;
+            c < nr_col; c += gridDim.x * blockDim.x) {
+        uint32_t sum = 0;
+        for (uint32_t r = 0; r < nr_row; ++ r) {
+            sum += data[r * nr_col + c];
+        }
+        data[c] = sum;
+    }
+}
+
+void reduce_rows_inplace(uint32_t nr_row, uint32_t nr_col, uint32_t *data) {
+    static std::atomic_bool launch_config_init{false};
+    static std::mutex launch_config_mtx;
+    static int grid_size, block_size;
+    if (!launch_config_init) {
+        std::lock_guard<std::mutex> lg{launch_config_mtx};
+        if (!launch_config_init) {
+            CUDA_CHECK(cudaOccupancyMaxPotentialBlockSize(
+                    &grid_size, &block_size, reduce_rows_inplace_kern));
+            grid_size = std::max<int>(grid_size * 4, nr_col / block_size);
+            printf("reduce_rows_inplace: grid=%d block=%d\n",
+                    grid_size, block_size);
+            launch_config_init = true;
+        }
+    }
+
+    reduce_rows_inplace_kern <<< grid_size, block_size >>> (
+            nr_row, nr_col, data);
+}
+
 //! rc4 key stream implemented on CPU, for testing purpose
 class RC4StreamCPU {
     uint8_t m_state[256], m_i = 0, m_j = 0;
@@ -316,7 +351,8 @@ void test_get_byte_counts() {
     CUDA_CHECK(cudaMemcpy(output_cpu.get(), output_gpu.get(),
                 OUTPUT_SIZE * sizeof(uint32_t), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaDeviceSynchronize());
-    static int stat[STREAM_LEN][256];
+    static int stat[STREAM_LEN][256], stat_tot[STREAM_LEN][256];
+    memset(stat_tot, 0, sizeof(stat_tot));
 
     for (int block = 0; block < GRID_SIZE; ++ block) {
         memset(stat, 0, sizeof(stat));
@@ -356,10 +392,29 @@ void test_get_byte_counts() {
                             block, i, j, offset, expect, get);
                     abort();
                 }
+                stat_tot[i][j] += expect;
             }
         }
     }
     fprintf(stderr, "test_get_byte_counts() passed\n");
+
+    reduce_rows_inplace(GRID_SIZE, STREAM_LEN * 256, output_gpu.get());
+    CUDA_CHECK(cudaMemcpy(output_cpu.get(), output_gpu.get(),
+                STREAM_LEN * 256 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    for (int i = 0; i < STREAM_LEN; ++ i) {
+        for (int j = 0; j < 256; ++ j) {
+            int expect = stat_tot[i][j],
+                get = output_cpu[i * 256 + j];
+            if (expect != get) {
+                fprintf(stderr, "reduce check failed at "
+                        "%d,%d: expect=%d get=%d\n",
+                        i,j, expect, get);
+                abort();
+            }
+        }
+    }
 }
 
 //! testcase for get_byte_counts
