@@ -297,8 +297,7 @@ class RC4Stat {
 
     public:
 
-        RC4Stat(int device, uint64_t seed0, uint64_t seed1)
-        {
+        RC4Stat(int device, uint64_t seed0, uint64_t seed1) {
             m_rng_state[0] = seed0;
             m_rng_state[1] = seed1;
             CUDA_CHECK(cudaSetDevice(device));
@@ -330,6 +329,10 @@ class RC4Stat {
             run_kerns();
         }
 
+        ~RC4Stat() {
+            CUDA_CHECK(cudaDeviceSynchronize());
+        }
+
         //! number of keys sampled during each run
         int nr_sample() const {
             return m_nr_sample;
@@ -340,6 +343,7 @@ class RC4Stat {
             CUDA_CHECK(cudaMemcpy(
                         m_stat_tmp, m_gpu_stat.get(), sizeof(m_stat_tmp),
                         cudaMemcpyDeviceToHost));
+            CUDA_CHECK(cudaDeviceSynchronize());
             run_kerns();
             for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
                 for (int j = 0; j < 256; ++ j) {
