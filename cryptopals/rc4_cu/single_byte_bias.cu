@@ -557,8 +557,9 @@ int main(int argc, char **argv) {
     while(finished_workers.load() < static_cast<size_t>(nr_dev)) {
         std::this_thread::sleep_for(std::chrono::milliseconds{500});
 
-        double elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::high_resolution_clock::now() - time_start).count();
+        double elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now() - time_start)
+            .count() * 1e-6;
         size_t done = tot_finished_samples.load();
         printf("%.2f secs, %zu samples: speed=%.2f samples/sec  \r",
                 elapsed, done, done / elapsed);
