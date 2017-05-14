@@ -1,7 +1,8 @@
 all: single_byte_bias
 
 single_byte_bias: single_byte_bias.cu *.cuh getcudacap
-	nvcc $< -o $@ --std=c++11 -gencode $$(./getcudacap) -lineinfo -g -O2
+	nvcc $< -o $@ -gencode $$(./getcudacap) -lineinfo \
+		--std=c++11 -g -O2 -Xcompiler -Wall,-Wextra
 	nvcc $< -o $@.ptx --std=c++11 -gencode $$(./getcudacap) -lineinfo -ptx
 
 getcudacap: getcudacap.cpp

@@ -3,7 +3,12 @@
 #include "./cuda_helper.cuh"
 
 #include <atomic>
+#include <thread>
 #include <mutex>
+#include <vector>
+#include <string>
+#include <chrono>
+
 #include <cassert>
 
 constexpr uint32_t
@@ -84,13 +89,17 @@ __global__ void rc4_gen_keystream_kern(
     }
 }
 
+int rc4_gen_keystream_smem_size(int block_size) {
+    return sizeof(KeyStreamThreadWorkspace) * block_size;
+}
+
 void rc4_gen_keystream(
         int grid_size, int block_size,
         uint64_t seed0, uint64_t seed1,
         uint32_t nr_sample, uint8_t *output) {
     assert(reinterpret_cast<uintptr_t>(output) % KEY_STREAM_TRX_SIZE == 0);
     rc4_gen_keystream_kern <<< grid_size, block_size,
-        sizeof(KeyStreamThreadWorkspace) * block_size >>> (
+        rc4_gen_keystream_smem_size(block_size) >>> (
                 seed0, seed1, nr_sample, output);
 }
 
@@ -198,6 +207,10 @@ __global__ void get_byte_counts_kern(
     }
 }
 
+int get_byte_counts_smem_size(int block_size) {
+    return block_size * (block_size + 4) + block_size * 256;
+}
+
 void get_byte_counts(
         int grid_size, int block_size,
         uint32_t size_x, uint32_t size_y,
@@ -209,7 +222,7 @@ void get_byte_counts(
     assert(reinterpret_cast<uintptr_t>(input) % KEY_STREAM_TRX_SIZE == 0);
     get_byte_counts_kern <<<
         grid_size, block_size,
-        block_size * (block_size + 4) + block_size * 256 >>>
+        get_byte_counts_smem_size(block_size) >>>
             (size_x, size_y,
              reinterpret_cast<const KeyStreamTrx*>(input), output);
 }
@@ -236,7 +249,7 @@ void reduce_rows_inplace(uint32_t nr_row, uint32_t nr_col, uint32_t *data) {
         if (!launch_config_init) {
             CUDA_CHECK(cudaOccupancyMaxPotentialBlockSize(
                     &grid_size, &block_size, reduce_rows_inplace_kern));
-            grid_size = std::max<int>(grid_size * 4, nr_col / block_size);
+            grid_size = std::min<int>(grid_size * 2, nr_col / block_size);
             printf("reduce_rows_inplace: grid=%d block=%d\n",
                     grid_size, block_size);
             launch_config_init = true;
@@ -246,6 +259,95 @@ void reduce_rows_inplace(uint32_t nr_row, uint32_t nr_col, uint32_t *data) {
     reduce_rows_inplace_kern <<< grid_size, block_size >>> (
             nr_row, nr_col, data);
 }
+
+class RC4Stat {
+    std::unique_ptr<uint8_t, CUDAMemReleaser> m_gpu_keystream;
+    std::unique_ptr<uint32_t, CUDAMemReleaser> m_gpu_stat;
+    int m_grid_gen, m_block_gen, m_grid_bcnt, m_block_bcnt, m_nr_sample;
+    uint32_t m_stat_tmp[STREAM_LEN][256];
+    uint64_t m_rng_state[2];
+    uint64_t m_stat[STREAM_LEN][256];
+
+    static int gcd(int a, int b) {
+        while (b) {
+            int t = a % b;
+            a = b;
+            b = t;
+        }
+        return a;
+    }
+
+    //! get min k such that a * k % b == 0
+    static int get_least_mul(int a, int b) {
+        return b / gcd(a, b);
+    }
+
+    void run_kerns() {
+        rc4_gen_keystream(
+                m_grid_gen, m_block_gen,
+                xorshift128plus(m_rng_state), xorshift128plus(m_rng_state),
+                m_nr_sample, m_gpu_keystream.get());
+        get_byte_counts(
+                m_grid_bcnt, m_block_bcnt,
+                m_grid_gen * m_nr_sample, m_block_gen,
+                m_gpu_keystream.get(), m_gpu_stat.get());
+        reduce_rows_inplace(
+                m_grid_bcnt, STREAM_LEN * 256, m_gpu_stat.get());
+    }
+
+    public:
+
+        RC4Stat(int device, uint64_t seed0, uint64_t seed1)
+        {
+            m_rng_state[0] = seed0;
+            m_rng_state[1] = seed1;
+            CUDA_CHECK(cudaSetDevice(device));
+            CUDA_CHECK(cudaOccupancyMaxPotentialBlockSizeVariableSMem(
+                        &m_grid_gen, &m_block_gen, rc4_gen_keystream_kern,
+                        rc4_gen_keystream_smem_size));
+            m_grid_gen *= 2;
+            CUDA_CHECK(cudaOccupancyMaxPotentialBlockSizeVariableSMem(
+                        &m_grid_bcnt, &m_block_bcnt, get_byte_counts_kern,
+                        get_byte_counts_smem_size));
+            m_grid_bcnt *= 2;
+
+            m_nr_sample = get_least_mul(
+                    m_grid_gen * m_block_gen,
+                    m_grid_bcnt * m_block_bcnt * BYTE_COUNT_STREAM_UNROLL);
+            m_gpu_stat = cuda_new_arr<uint32_t>(m_grid_bcnt * STREAM_LEN * 256);
+            size_t free_byte, tot_byte;
+            CUDA_CHECK(cudaMemGetInfo(&free_byte, &tot_byte));
+            m_nr_sample *= free_byte / (
+                    m_grid_gen * m_nr_sample * STREAM_LEN * m_block_gen);
+            m_gpu_keystream = cuda_new_arr<uint8_t>(
+                    m_grid_gen * m_nr_sample * STREAM_LEN * m_block_gen);
+
+            fprintf(stderr, "device %d: "
+                    "keystream=%dx%d nr_sample=%d stat=%dx%d\n",
+                    device, m_grid_gen, m_block_gen, m_nr_sample,
+                    m_grid_bcnt, m_block_bcnt);
+            memset(m_stat, 0, sizeof(m_stat));
+            run_kerns();
+        }
+
+        //! number of keys sampled during each run
+        int nr_sample() const {
+            return m_nr_sample;
+        }
+
+        //! accumulate statistics
+        void accum() {
+            CUDA_CHECK(cudaMemcpy(
+                        m_stat_tmp, m_gpu_stat.get(), sizeof(m_stat_tmp),
+                        cudaMemcpyDeviceToHost));
+            run_kerns();
+            for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
+                for (int j = 0; j < 256; ++ j) {
+                    m_stat[i][j] += m_stat_tmp[i][j];
+                }
+            }
+        }
+};
 
 //! rc4 key stream implemented on CPU, for testing purpose
 class RC4StreamCPU {
@@ -380,7 +482,7 @@ void test_get_byte_counts() {
                 }
             }
         }
-        for (int i = 0; i < STREAM_LEN; ++ i) {
+        for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
             for (int j = 0; j < 256; ++ j ){
                 int expect = stat[i][j],
                     offset = block * STREAM_LEN * 256 + i * 256 + j,
@@ -403,7 +505,7 @@ void test_get_byte_counts() {
                 STREAM_LEN * 256 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    for (int i = 0; i < STREAM_LEN; ++ i) {
+    for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
         for (int j = 0; j < 256; ++ j) {
             int expect = stat_tot[i][j],
                 get = output_cpu[i * 256 + j];
@@ -419,9 +521,49 @@ void test_get_byte_counts() {
 
 //! testcase for get_byte_counts
 
-int main() {
-    test_get_byte_counts();
-    test_rc4_gen_keystream();
+int main(int argc, char **argv) {
+    if (argc <= 1) {
+        fprintf(stderr, "===== usage ===== %s <nr_execs_per_thread>\n",
+                argv[0]);
+        test_get_byte_counts();
+        test_rc4_gen_keystream();
+        return 0;
+    }
+
+    int nr_exec_per_thread = std::stoi(argv[1]);
+    std::atomic_size_t tot_finished_samples{0}, finished_workers{0};
+
+    auto worker = [&](int device, uint64_t seed0, uint64_t seed1) {
+        std::unique_ptr<RC4Stat> stat{new RC4Stat{device, seed0, seed1}};
+        for (int i = 0; i < nr_exec_per_thread; ++ i) {
+            stat->accum();
+            tot_finished_samples += stat->nr_sample();
+        }
+        finished_workers += 1;
+    };
+
+    std::vector<std::thread> threads;
+    int nr_dev;
+    CUDA_CHECK(cudaGetDeviceCount(&nr_dev));
+    for (int i = 0; i < nr_dev; ++ i) {
+        threads.emplace_back(worker, i, 123, 456);
+    }
+
+    auto time_start = std::chrono::high_resolution_clock::now();
+    while(finished_workers.load() < static_cast<size_t>(nr_dev)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{500});
+
+        double elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::high_resolution_clock::now() - time_start).count();
+        size_t done = tot_finished_samples.load();
+        printf("%.2f secs, %zu samples: speed=%.2f samples/sec  \r",
+                elapsed, done, done / elapsed);
+        fflush(stdout);
+    }
+
+    for (auto &&i: threads) {
+        i.join();
+    }
 }
 
 // vim: ft=cuda syntax=cuda.doxygen foldmethod=marker foldmarker=f{{{,f}}}
