@@ -1,2 +1,3 @@
 single_byte_bias
 getcudacap
+*.ptx
