@@ -10,6 +10,7 @@
 #include <chrono>
 
 #include <cassert>
+#include <cmath>
 
 constexpr uint32_t
     KEY_LEN = 16,       //!< key length in bytes
@@ -56,7 +57,7 @@ __global__ void rc4_gen_keystream_kern(
     uint64_t xorshift128_state[2];
     xorshift128_state[0] = threadIdx.x ^ seed0;
     xorshift128_state[1] = blockIdx.x ^ seed1;
-    output += blockIdx.x * nr_sample * STREAM_LEN * blockDim.x;
+    output += static_cast<size_t>(blockIdx.x * nr_sample * blockDim.x) * STREAM_LEN;
 
     KeyStreamTrx * __restrict__ out_tx =
         reinterpret_cast<KeyStreamTrx*>(output);
@@ -165,9 +166,9 @@ __global__ void get_byte_counts_kern(
                 uint32_t stream_idx = stream_idx0 + stream_unroll * blockDim.x,
                          stream_x = stream_idx / size_y,
                          stream_y = stream_idx - stream_x * size_y;
-                uint32_t inp_base_offset =
-                    (stream_x * NR_TRX_PER_STREAM + trx_pos) * size_y +
-                    stream_y;
+                size_t inp_base_offset =
+                    (static_cast<size_t>(stream_x) * NR_TRX_PER_STREAM +
+                     trx_pos) * size_y + stream_y;
 
                 // load inputs into stream_cache
                 auto dst = reinterpret_cast<uint32_t*>(local_stream_cache);
@@ -323,7 +324,7 @@ class RC4Stat {
                     m_grid_gen * m_nr_sample * STREAM_LEN * m_block_gen);
             m_nr_sample_tot = m_grid_gen * m_nr_sample * m_block_gen;
             m_gpu_keystream = cuda_new_arr<uint8_t>(
-                    m_nr_sample_tot * STREAM_LEN);
+                    static_cast<size_t>(m_nr_sample_tot) * STREAM_LEN);
 
             fprintf(stderr, "device %d: "
                     "keystream=%dx%d nr_sample=%u stat=%dx%d\n",
@@ -567,14 +568,16 @@ int main(int argc, char **argv) {
     while(finished_workers.load() < static_cast<size_t>(nr_dev)) {
         std::this_thread::sleep_for(std::chrono::milliseconds{500});
 
+        size_t done = tot_finished_samples.load();
         double elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::high_resolution_clock::now() - time_start)
-            .count() * 1e-6;
-        size_t done = tot_finished_samples.load();
-        printf("%.2f secs, %zu samples: speed=%.2f samples/sec  \r",
-                elapsed, done, done / elapsed);
+            .count() * 1e-6,
+            speed = done / elapsed;
+        printf("\r%.2f secs, %zu samples: speed=%.2f(2**%.2f) samples/sec  ",
+                elapsed, done, speed, std::log2(speed));
         fflush(stdout);
     }
+    printf("\n");
 
     for (auto &&i: threads) {
         i.join();
