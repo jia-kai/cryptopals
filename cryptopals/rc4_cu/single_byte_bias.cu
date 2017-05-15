@@ -639,25 +639,25 @@ void test_get_byte_counts() {
 int main(int argc, char **argv) {
     if (argc <= 1) {
         fprintf(stderr, "===== usage ===== %s "
-                "<nr_execs_per_thread> [<snapshot_to_load>]\n",
+                "<nr_iter_per_thread> [<snapshot_to_load>]\n",
                 argv[0]);
         test_get_byte_counts();
         test_rc4_gen_keystream();
         return 0;
     }
 
-    int nr_exec_per_thread = std::stoi(argv[1]);
-    std::atomic_size_t tot_finished_samples{0}, tot_sample_per_iter{0};
+    int nr_iter_per_thread = std::stoi(argv[1]);
+    std::atomic_size_t tot_finished_samples{0}, tot_samples_per_iter{0};
     std::atomic_int finished_workers{0}, started_workers{0};
 
     std::vector<std::unique_ptr<RC4Stat>> worker_stats;
 
     auto worker = [&](int device, uint64_t seed0, uint64_t seed1) {
         auto stat = new RC4Stat{device, seed0, seed1};
-        tot_sample_per_iter += stat->nr_sample();
+        tot_samples_per_iter += stat->nr_sample();
         worker_stats[device].reset(stat);
         started_workers += 1;
-        for (int i = 0; i < nr_exec_per_thread; ++ i) {
+        for (int i = 0; i < nr_iter_per_thread; ++ i) {
             stat->accum();
             tot_finished_samples += stat->nr_sample();
         }
@@ -681,7 +681,7 @@ int main(int argc, char **argv) {
                 rng_seed.tv_usec + i * 2);
     }
 
-    while (started_workers.load() < nr_dev) {
+    while (started_workers.load() < nr_dev || !tot_finished_samples.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds{500});
     }
 
@@ -698,16 +698,20 @@ int main(int argc, char **argv) {
         fprintf(stderr, "load snapshot from %s\n", snapshot_name);
     }
 
+    size_t tot_samples_expect = nr_iter_per_thread * tot_samples_per_iter;
     while(finished_workers.load() < nr_dev) {
         std::this_thread::sleep_for(std::chrono::milliseconds{500});
 
         size_t done = tot_finished_samples.load();
         double elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::high_resolution_clock::now() - time_start)
-            .count() * 1e-6,
-            speed = done / elapsed;
-        printf("\r%.2f secs, %zu samples: speed=%.2f(2**%.2f) samples/sec  ",
-                elapsed, done, speed, std::log2(speed));
+                std::chrono::high_resolution_clock::now() -
+                time_start).count() * 1e-6,
+            speed = done / elapsed,
+            eta = (tot_samples_expect / double(done) - 1.) * elapsed;
+        printf("\r%.2f secs %.1f%%: speed=%.2f(2**%.2f)samples/sec "
+                "ETA=%.2f secs  ",
+                elapsed, done * 100.0 / tot_samples_expect,
+                speed, std::log2(speed), eta);
         fflush(stdout);
         if (elapsed >= next_save_time) {
             for (auto &&i: worker_stats) {
@@ -731,6 +735,7 @@ int main(int argc, char **argv) {
     for (auto &&i: worker_stats) {
         i->swap_to_stat(tot_stat);
     }
+    assert(tot_samples_expect == tot_finished_samples);
     tot_stat.save(snapshot_name, tot_finished_samples.load());
 }
 
