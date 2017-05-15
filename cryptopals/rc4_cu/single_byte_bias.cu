@@ -220,6 +220,8 @@ void get_byte_counts(
             (grid_size * block_size * BYTE_COUNT_STREAM_UNROLL) == 0);
     assert(block_size % KEY_STREAM_TRX_SIZE == 0);
     assert(reinterpret_cast<uintptr_t>(input) % KEY_STREAM_TRX_SIZE == 0);
+    CUDA_CHECK(cudaMemset(output, 0,
+                grid_size * STREAM_LEN * 256 * sizeof(uint32_t)));
     get_byte_counts_kern <<<
         grid_size, block_size,
         get_byte_counts_smem_size(block_size) >>>
@@ -263,7 +265,8 @@ void reduce_rows_inplace(uint32_t nr_row, uint32_t nr_col, uint32_t *data) {
 class RC4Stat {
     std::unique_ptr<uint8_t, CUDAMemReleaser> m_gpu_keystream;
     std::unique_ptr<uint32_t, CUDAMemReleaser> m_gpu_stat;
-    int m_grid_gen, m_block_gen, m_grid_bcnt, m_block_bcnt, m_nr_sample;
+    int m_grid_gen, m_block_gen, m_grid_bcnt, m_block_bcnt;
+    uint32_t m_nr_sample, m_nr_sample_tot;
     uint32_t m_stat_tmp[STREAM_LEN][256];
     uint64_t m_rng_state[2];
     uint64_t m_stat[STREAM_LEN][256];
@@ -282,7 +285,7 @@ class RC4Stat {
         return b / gcd(a, b);
     }
 
-    void run_kerns() {
+    void start_kerns() {
         rc4_gen_keystream(
                 m_grid_gen, m_block_gen,
                 xorshift128plus(m_rng_state), xorshift128plus(m_rng_state),
@@ -318,15 +321,16 @@ class RC4Stat {
             CUDA_CHECK(cudaMemGetInfo(&free_byte, &tot_byte));
             m_nr_sample *= free_byte / (
                     m_grid_gen * m_nr_sample * STREAM_LEN * m_block_gen);
+            m_nr_sample_tot = m_grid_gen * m_nr_sample * m_block_gen;
             m_gpu_keystream = cuda_new_arr<uint8_t>(
-                    m_grid_gen * m_nr_sample * STREAM_LEN * m_block_gen);
+                    m_nr_sample_tot * STREAM_LEN);
 
             fprintf(stderr, "device %d: "
-                    "keystream=%dx%d nr_sample=%d stat=%dx%d\n",
+                    "keystream=%dx%d nr_sample=%u stat=%dx%d\n",
                     device, m_grid_gen, m_block_gen, m_nr_sample,
                     m_grid_bcnt, m_block_bcnt);
             memset(m_stat, 0, sizeof(m_stat));
-            run_kerns();
+            start_kerns();
         }
 
         ~RC4Stat() {
@@ -334,8 +338,8 @@ class RC4Stat {
         }
 
         //! number of keys sampled during each run
-        int nr_sample() const {
-            return m_nr_sample;
+        uint32_t nr_sample() const {
+            return m_nr_sample_tot;
         }
 
         //! accumulate statistics
@@ -344,10 +348,17 @@ class RC4Stat {
                         m_stat_tmp, m_gpu_stat.get(), sizeof(m_stat_tmp),
                         cudaMemcpyDeviceToHost));
             CUDA_CHECK(cudaDeviceSynchronize());
-            run_kerns();
+            start_kerns();
             for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
+                uint32_t sum = 0;
                 for (int j = 0; j < 256; ++ j) {
                     m_stat[i][j] += m_stat_tmp[i][j];
+                    sum += m_stat_tmp[i][j];
+                }
+                if (sum != nr_sample()) {
+                    fprintf(stderr, "sum sanity check failed: stream_id=%d "
+                            "get=%u expected=%u\n", i, sum, nr_sample());
+                    abort();
                 }
             }
         }
@@ -441,7 +452,6 @@ void test_get_byte_counts() {
     std::unique_ptr<uint32_t[]> output_cpu{new uint32_t[OUTPUT_SIZE]};
     auto input_gpu = cuda_new_arr<uint8_t>(INPUT_SIZE);
     auto output_gpu = cuda_new_arr<uint32_t>(OUTPUT_SIZE);
-    CUDA_CHECK(cudaMemset(output_gpu.get(), 0, sizeof(uint32_t) * OUTPUT_SIZE));
     {
         uint64_t state[2] = {123, 456};
         uint64_t *dst = reinterpret_cast<uint64_t*>(input_cpu.get());
