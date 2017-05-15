@@ -19,7 +19,7 @@ constexpr double
     //! interval of seconds to between save
     SAVE_INTERNAL = 10,
     //! interval of seconds between changing snapshot name
-    UPDATE_NAME_INTERVAL = 36;
+    UPDATE_NAME_INTERVAL = 3600;
 
 constexpr uint32_t
     KEY_LEN = 16,       //!< key length in bytes
