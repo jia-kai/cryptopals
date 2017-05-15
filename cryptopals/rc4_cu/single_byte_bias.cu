@@ -12,6 +12,15 @@
 #include <cassert>
 #include <cmath>
 
+#include <unistd.h>
+#include <sys/time.h>
+
+constexpr double
+    //! interval of seconds to between save
+    SAVE_INTERNAL = 10,
+    //! interval of seconds between changing snapshot name
+    UPDATE_NAME_INTERVAL = 36;
+
 constexpr uint32_t
     KEY_LEN = 16,       //!< key length in bytes
     STREAM_LEN = 512,   //!< length of key streams to be generated
@@ -57,7 +66,8 @@ __global__ void rc4_gen_keystream_kern(
     uint64_t xorshift128_state[2];
     xorshift128_state[0] = threadIdx.x ^ seed0;
     xorshift128_state[1] = blockIdx.x ^ seed1;
-    output += static_cast<size_t>(blockIdx.x * nr_sample * blockDim.x) * STREAM_LEN;
+    output += static_cast<size_t>(blockIdx.x * nr_sample * blockDim.x) *
+        STREAM_LEN;
 
     KeyStreamTrx * __restrict__ out_tx =
         reinterpret_cast<KeyStreamTrx*>(output);
@@ -270,7 +280,6 @@ class RC4Stat {
     uint32_t m_nr_sample, m_nr_sample_tot;
     uint32_t m_stat_tmp[STREAM_LEN][256];
     uint64_t m_rng_state[2];
-    uint64_t m_stat[STREAM_LEN][256];
 
     static int gcd(int a, int b) {
         while (b) {
@@ -300,6 +309,20 @@ class RC4Stat {
     }
 
     public:
+        struct Stat {
+            uint64_t cnt[STREAM_LEN][256];
+
+            Stat() {
+                reset();
+            }
+
+            void reset() {
+                memset(cnt, 0, sizeof(cnt));
+            }
+
+            void save(const char *path, uint64_t nr_sample_check);
+            void load(const char *path);
+        };
 
         RC4Stat(int device, uint64_t seed0, uint64_t seed1) {
             m_rng_state[0] = seed0;
@@ -327,10 +350,10 @@ class RC4Stat {
                     static_cast<size_t>(m_nr_sample_tot) * STREAM_LEN);
 
             fprintf(stderr, "device %d: "
-                    "keystream=%dx%d nr_sample=%u stat=%dx%d\n",
+                    "keystream=%dx%d nr_sample=%u stat=%dx%d "
+                    "thrpt=%dsamples/iter\n",
                     device, m_grid_gen, m_block_gen, m_nr_sample,
-                    m_grid_bcnt, m_block_bcnt);
-            memset(m_stat, 0, sizeof(m_stat));
+                    m_grid_bcnt, m_block_bcnt, m_nr_sample_tot);
             start_kerns();
         }
 
@@ -353,7 +376,7 @@ class RC4Stat {
             for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
                 uint32_t sum = 0;
                 for (int j = 0; j < 256; ++ j) {
-                    m_stat[i][j] += m_stat_tmp[i][j];
+                    m_stat.cnt[i][j] += m_stat_tmp[i][j];
                     sum += m_stat_tmp[i][j];
                 }
                 if (sum != nr_sample()) {
@@ -363,7 +386,84 @@ class RC4Stat {
                 }
             }
         }
+
+        //! clear self swap and add to dst
+        void swap_to_stat(Stat &dst) {
+            std::lock_guard<std::mutex> lg{m_stat_mtx};
+            for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
+                for (int j = 0; j < 256; ++ j) {
+                    dst.cnt[i][j] += m_stat.cnt[i][j];
+                }
+            }
+            m_stat.reset();
+        }
+
+    private:
+        std::mutex m_stat_mtx;
+        Stat m_stat;
 };
+
+void RC4Stat::Stat::save(const char *path, uint64_t nr_sample_check) {
+    using ull = unsigned long long;
+    FILE *fout = fopen(path, "w");
+    if (!fout) {
+        fprintf(stderr, "failed to open %s: %s", path, strerror(errno));
+        abort();
+    }
+    for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
+        uint64_t sum = 0;
+        for (int j = 0; j < 256; ++ j) {
+            fprintf(fout, "%llu ", ull(cnt[i][j]));
+            sum += cnt[i][j];
+        }
+        if (nr_sample_check && sum != nr_sample_check) {
+            fprintf(stderr, "sum sanity check failed in save: stream_id=%d "
+                    "get=%llu expected=%llu\n", i,
+                    ull(sum), ull(nr_sample_check));
+            abort();
+        } else if (!nr_sample_check) {
+            nr_sample_check = sum;
+        }
+        fprintf(fout, "\n");
+    }
+
+    fprintf(fout, "prob mat:\n");
+    for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
+        for (int j = 0; j < 256; ++ j) {
+            fprintf(fout, "%.3f ", cnt[i][j] / double(nr_sample_check));
+        }
+        fprintf(fout, "\n");
+    }
+
+    fprintf(fout, "relative prob mat:\n");
+    for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
+        for (int j = 0; j < 256; ++ j) {
+            fprintf(fout, "%.3f ", cnt[i][j] / double(nr_sample_check) * 256.0);
+        }
+        fprintf(fout, "\n");
+    }
+    fclose(fout);
+}
+
+void RC4Stat::Stat::load(const char *path) {
+    FILE *fin = fopen(path, "r");
+    if (!fin) {
+        fprintf(stderr, "failed to open %s: %s", path, strerror(errno));
+        abort();
+    }
+    unsigned long long get;
+    for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
+        for (int j = 0; j < 256; ++ j) {
+            if (fscanf(fin, "%llu", &get) != 1) {
+                fprintf(stderr, "failed to load %d,%d from %s\n",
+                        i, j, path);
+                abort();
+            }
+            cnt[i][j] = get;
+        }
+    }
+    fclose(fin);
+}
 
 //! rc4 key stream implemented on CPU, for testing purpose
 class RC4StreamCPU {
@@ -538,7 +638,8 @@ void test_get_byte_counts() {
 
 int main(int argc, char **argv) {
     if (argc <= 1) {
-        fprintf(stderr, "===== usage ===== %s <nr_execs_per_thread>\n",
+        fprintf(stderr, "===== usage ===== %s "
+                "<nr_execs_per_thread> [<snapshot_to_load>]\n",
                 argv[0]);
         test_get_byte_counts();
         test_rc4_gen_keystream();
@@ -546,10 +647,16 @@ int main(int argc, char **argv) {
     }
 
     int nr_exec_per_thread = std::stoi(argv[1]);
-    std::atomic_size_t tot_finished_samples{0}, finished_workers{0};
+    std::atomic_size_t tot_finished_samples{0}, tot_sample_per_iter{0};
+    std::atomic_int finished_workers{0}, started_workers{0};
+
+    std::vector<std::unique_ptr<RC4Stat>> worker_stats;
 
     auto worker = [&](int device, uint64_t seed0, uint64_t seed1) {
-        std::unique_ptr<RC4Stat> stat{new RC4Stat{device, seed0, seed1}};
+        auto stat = new RC4Stat{device, seed0, seed1};
+        tot_sample_per_iter += stat->nr_sample();
+        worker_stats[device].reset(stat);
+        started_workers += 1;
         for (int i = 0; i < nr_exec_per_thread; ++ i) {
             stat->accum();
             tot_finished_samples += stat->nr_sample();
@@ -560,12 +667,38 @@ int main(int argc, char **argv) {
     std::vector<std::thread> threads;
     int nr_dev;
     CUDA_CHECK(cudaGetDeviceCount(&nr_dev));
+    worker_stats.resize(nr_dev);
+
+    struct timeval rng_seed;
+    if (gettimeofday(&rng_seed, nullptr)) {
+        fprintf(stderr, "gettimeofday failed\n");
+        return -1;
+    }
+
     for (int i = 0; i < nr_dev; ++ i) {
-        threads.emplace_back(worker, i, 123, 456);
+        threads.emplace_back(worker, i,
+                rng_seed.tv_sec + i,
+                rng_seed.tv_usec + i * 2);
+    }
+
+    while (started_workers.load() < nr_dev) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{500});
     }
 
     auto time_start = std::chrono::high_resolution_clock::now();
-    while(finished_workers.load() < static_cast<size_t>(nr_dev)) {
+    RC4Stat::Stat tot_stat;
+    double next_save_time = SAVE_INTERNAL,
+           next_name_update_time = UPDATE_NAME_INTERVAL;
+    char snapshot_name[256];
+    int snapshot_name_num = 0;
+    sprintf(snapshot_name, "snapshot.%d.0", getpid());
+
+    if (argc == 3) {
+        tot_stat.load(snapshot_name);
+        fprintf(stderr, "load snapshot from %s\n", snapshot_name);
+    }
+
+    while(finished_workers.load() < nr_dev) {
         std::this_thread::sleep_for(std::chrono::milliseconds{500});
 
         size_t done = tot_finished_samples.load();
@@ -576,12 +709,29 @@ int main(int argc, char **argv) {
         printf("\r%.2f secs, %zu samples: speed=%.2f(2**%.2f) samples/sec  ",
                 elapsed, done, speed, std::log2(speed));
         fflush(stdout);
+        if (elapsed >= next_save_time) {
+            for (auto &&i: worker_stats) {
+                i->swap_to_stat(tot_stat);
+            }
+            tot_stat.save(snapshot_name, 0);
+            next_save_time += SAVE_INTERNAL;
+        }
+        if (elapsed >= next_name_update_time) {
+            sprintf(snapshot_name, "snapshot.%d.%d", getpid(),
+                    ++ snapshot_name_num);
+            next_name_update_time += UPDATE_NAME_INTERVAL;
+        }
     }
     printf("\n");
 
     for (auto &&i: threads) {
         i.join();
     }
+
+    for (auto &&i: worker_stats) {
+        i->swap_to_stat(tot_stat);
+    }
+    tot_stat.save(snapshot_name, tot_finished_samples.load());
 }
 
 // vim: ft=cuda syntax=cuda.doxygen foldmethod=marker foldmarker=f{{{,f}}}
