@@ -373,6 +373,8 @@ class RC4Stat {
                         cudaMemcpyDeviceToHost));
             CUDA_CHECK(cudaDeviceSynchronize());
             start_kerns();
+
+            std::lock_guard<std::mutex> lg{m_stat_mtx};
             for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
                 uint32_t sum = 0;
                 for (int j = 0; j < 256; ++ j) {
@@ -380,7 +382,7 @@ class RC4Stat {
                     sum += m_stat_tmp[i][j];
                 }
                 if (sum != nr_sample()) {
-                    fprintf(stderr, "sum sanity check failed: stream_id=%d "
+                    fprintf(stderr, "sum sanity check failed: pos=%d "
                             "get=%u expected=%u\n", i, sum, nr_sample());
                     abort();
                 }
@@ -407,7 +409,7 @@ void RC4Stat::Stat::save(const char *path, uint64_t nr_sample_check) {
     using ull = unsigned long long;
     FILE *fout = fopen(path, "w");
     if (!fout) {
-        fprintf(stderr, "failed to open %s: %s", path, strerror(errno));
+        fprintf(stderr, "save: failed to open %s: %s\n", path, strerror(errno));
         abort();
     }
     for (uint32_t i = 0; i < STREAM_LEN; ++ i) {
@@ -417,7 +419,7 @@ void RC4Stat::Stat::save(const char *path, uint64_t nr_sample_check) {
             sum += cnt[i][j];
         }
         if (nr_sample_check && sum != nr_sample_check) {
-            fprintf(stderr, "sum sanity check failed in save: stream_id=%d "
+            fprintf(stderr, "sum sanity check failed in save: pos=%d "
                     "get=%llu expected=%llu\n", i,
                     ull(sum), ull(nr_sample_check));
             abort();
@@ -448,7 +450,7 @@ void RC4Stat::Stat::save(const char *path, uint64_t nr_sample_check) {
 void RC4Stat::Stat::load(const char *path) {
     FILE *fin = fopen(path, "r");
     if (!fin) {
-        fprintf(stderr, "failed to open %s: %s", path, strerror(errno));
+        fprintf(stderr, "load: failed to open %s: %s\n", path, strerror(errno));
         abort();
     }
     unsigned long long get;
@@ -681,22 +683,23 @@ int main(int argc, char **argv) {
                 rng_seed.tv_usec + i * 2);
     }
 
-    while (started_workers.load() < nr_dev || !tot_finished_samples.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds{500});
-    }
-
-    auto time_start = std::chrono::high_resolution_clock::now();
     RC4Stat::Stat tot_stat;
-    double next_save_time = SAVE_INTERNAL,
-           next_name_update_time = UPDATE_NAME_INTERVAL;
     char snapshot_name[256];
     int snapshot_name_num = 0;
     sprintf(snapshot_name, "snapshot.%d.0", getpid());
 
     if (argc == 3) {
-        tot_stat.load(snapshot_name);
-        fprintf(stderr, "load snapshot from %s\n", snapshot_name);
+        tot_stat.load(argv[2]);
+        fprintf(stderr, "load snapshot from %s\n", argv[2]);
     }
+
+    double next_save_time = SAVE_INTERNAL,
+           next_name_update_time = UPDATE_NAME_INTERVAL;
+    while (started_workers.load() < nr_dev || !tot_finished_samples.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{500});
+    }
+
+    auto time_start = std::chrono::high_resolution_clock::now();
 
     size_t tot_samples_expect = nr_iter_per_thread * tot_samples_per_iter;
     while(finished_workers.load() < nr_dev) {
