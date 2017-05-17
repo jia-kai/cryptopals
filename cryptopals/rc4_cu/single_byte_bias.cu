@@ -545,6 +545,7 @@ void test_rc4_gen_keystream() {
     fprintf(stderr, "test_rc4_gen_keystream() passed\n");
 }
 
+//! testcase for get_byte_counts
 void test_get_byte_counts() {
     constexpr int
         GRID_SIZE = 3, BLOCK_SIZE = 32, SIZE_X = 96, SIZE_Y = 48,
@@ -636,16 +637,90 @@ void test_get_byte_counts() {
     }
 }
 
-//! testcase for get_byte_counts
+int gen_test(int argc, char **argv) {
+    if (argc != 5) {
+        return -1;
+    }
+    std::atomic_int nr_case{std::stoi(argv[2])},
+        started_workers{0}, finished_workers{0};
+    auto min_samples = std::stoull(argv[3]),
+         max_samples = std::stoull(argv[4]);
+
+    std::vector<std::unique_ptr<RC4Stat>> worker_stats;
+    auto worker = [&](int device, uint64_t seed0, uint64_t seed1) {
+        using ull = unsigned long long;
+        auto stat = new RC4Stat{device, seed0, seed1};
+        ull min_iters = min_samples / stat->nr_sample(),
+            max_iters = (max_samples - 1) / stat->nr_sample() + 1;
+        worker_stats[device].reset(stat);
+        started_workers += 1;
+        int case_num;
+        while ((case_num = (nr_case --)) > 0) {
+            char fname[255];
+            RC4Stat::Stat result;
+            for (ull i = 0; i + 1 < min_iters; ++ i) {
+                stat->accum();
+            }
+            ull next_to_dump = min_iters;
+            for (ull i = min_iters; i <= max_iters; ++ i) {
+                stat->accum();
+                if (i == next_to_dump || i == max_iters) {
+                    stat->swap_to_stat(result);
+                    ull samples = (i + 1) * stat->nr_sample();
+                    sprintf(fname, "testcase.%d.%llu", case_num, samples);
+                    result.save(fname, samples);
+                    next_to_dump *= 2;
+                }
+            }
+        }
+        finished_workers += 1;
+    };
+
+    std::vector<std::thread> threads;
+    int nr_dev;
+    CUDA_CHECK(cudaGetDeviceCount(&nr_dev));
+    worker_stats.resize(nr_dev);
+
+    struct timeval rng_seed;
+    if (gettimeofday(&rng_seed, nullptr)) {
+        fprintf(stderr, "gettimeofday failed\n");
+        return -1;
+    }
+
+    for (int i = 0; i < nr_dev; ++ i) {
+        threads.emplace_back(worker, i,
+                rng_seed.tv_sec + i,
+                rng_seed.tv_usec + i * 2);
+    }
+    while(finished_workers.load() < nr_dev) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{500});
+        printf("\rremaining cases: %d ", nr_case.load() + 1);
+        fflush(stdout);
+    }
+    printf("\n");
+    for (auto &&i: threads) {
+        i.join();
+    }
+    return 0;
+}
 
 int main(int argc, char **argv) {
     if (argc <= 1) {
-        fprintf(stderr, "===== usage ===== %s "
-                "<nr_iter_per_thread> [<snapshot_to_load>]\n",
-                argv[0]);
+        fprintf(stderr, "===== usage =====\n"
+                "%s: correctness check\n"
+                "%s <nr_iter_per_thread> [<snapshot_to_load>]: "
+                "generate training data\n"
+                "%s test <number of cases> <minimal samples> <maximal samples>: "
+                "generate test data\n"
+                , argv[0], argv[0], argv[0]);
+        printf("run correctness check\n");
         test_get_byte_counts();
         test_rc4_gen_keystream();
         return 0;
+    }
+
+    if (!strcmp(argv[1], "test")) {
+        return gen_test(argc, argv);
     }
 
     int nr_iter_per_thread = std::stoi(argv[1]);
@@ -742,4 +817,4 @@ int main(int argc, char **argv) {
     tot_stat.save(snapshot_name, tot_finished_samples.load());
 }
 
-// vim: ft=cuda syntax=cuda.doxygen foldmethod=marker foldmarker=f{{{,f}}}
+// vim: ft=cuda tw=80 syntax=cuda.doxygen
