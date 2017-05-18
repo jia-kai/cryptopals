@@ -650,7 +650,7 @@ int gen_test(int argc, char **argv) {
     auto worker = [&](int device, uint64_t seed0, uint64_t seed1) {
         using ull = unsigned long long;
         auto stat = new RC4Stat{device, seed0, seed1};
-        ull min_iters = min_samples / stat->nr_sample(),
+        ull min_iters = std::max<ull>(min_samples / stat->nr_sample(), 1),
             max_iters = (max_samples - 1) / stat->nr_sample() + 1;
         worker_stats[device].reset(stat);
         started_workers += 1;
@@ -658,7 +658,7 @@ int gen_test(int argc, char **argv) {
         while ((case_num = (nr_case --)) > 0) {
             char fname[255];
             RC4Stat::Stat result;
-            for (ull i = 0; i + 1 < min_iters; ++ i) {
+            for (ull i = 0; i < min_iters - 1; ++ i) {
                 stat->accum();
             }
             ull next_to_dump = min_iters;
@@ -666,7 +666,7 @@ int gen_test(int argc, char **argv) {
                 stat->accum();
                 if (i == next_to_dump || i == max_iters) {
                     stat->swap_to_stat(result);
-                    ull samples = (i + 1) * stat->nr_sample();
+                    ull samples = i * stat->nr_sample();
                     sprintf(fname, "testcase.%d.%llu", case_num, samples);
                     result.save(fname, samples);
                     next_to_dump *= 2;
