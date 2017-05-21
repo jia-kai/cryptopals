@@ -764,3 +764,7 @@ def ch55():
         return ch55_impl()
     finally:
         np.warnings.filters[:] = warnings_filters
+
+@challenge
+def ch56():
+    return 'see cryptopals/rc4_cu'
